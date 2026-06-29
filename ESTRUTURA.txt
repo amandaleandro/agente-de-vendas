@@ -1,0 +1,139 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║         🤖 FEZINHA BOT - ESTRUTURA PROFISSIONAL DO PROJETO                     ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+fezinha-bot/
+│
+├── 📋 README.md                        # Documentação principal do projeto
+├── 🚀 start.sh                         # Script de inicialização (Linux/Mac)
+├── 🚀 start.bat                        # Script de inicialização (Windows)
+├── ⚙️  .env.example                    # Template de variáveis de ambiente
+├── 🚫 .gitignore                       # Configuração do Git
+│
+├── 📦 backend/                         # 🖥️  SERVIDOR E LÓGICA DA APLICAÇÃO
+│   │
+│   ├── 🚀 index.js                     # Aplicação principal do bot
+│   ├── 📋 package.json                 # Dependências do Node.js
+│   ├── 📋 package-lock.json            # Lock de versões
+│   │
+│   ├── ⚙️  config/                     # CONFIGURAÇÕES
+│   │   └── .env                        # Variáveis de ambiente
+│   │
+│   ├── 📦 modules/                     # MÓDULOS CORE (14 arquivos)
+│   │   ├── index.js                    # Entry point
+│   │   ├── webserver.js                # API REST e servidor web
+│   │   ├── tank.js                     # Queue de mensagens
+│   │   ├── warmup.js                   # Gerenciador de warmup
+│   │   ├── diagnostico-manager.js      # Gerenciador de diagnóstico
+│   │   ├── diagnostico-prompt.js       # Prompts do diagnóstico
+│   │   ├── backup.js                   # Sistema de backup automático
+│   │   ├── cache.js                    # Cache em memória
+│   │   ├── csv.js                      # Processamento de CSV
+│   │   ├── healthcheck.js              # Health check do sistema
+│   │   ├── logger.js                   # Sistema de logs
+│   │   ├── metrics.js                  # Coleta de métricas
+│   │   ├── ratelimit.js                # Rate limiting
+│   │   └── security.js                 # Segurança
+│   │
+│   ├── 📊 conhecimento/                # BASE DE CONHECIMENTO
+│   │   ├── Base_de_Conhecimento_FechaPro_Fezinha.docx
+│   │   ├── FLUXO-COMERCIAL.txt         # Fluxo de vendas
+│   │   ├── PLANOS-E-PRECOS.txt         # Tabela de preços
+│   │   ├── REPERTORIO-DE-CONVERSA.md   # Respostas do bot
+│   │   ├── GUIA-DE-ANALISE-DO-DIAGNOSTICO.md
+│   │   ├── PLANOS-E-LINKS.md
+│   │   └── LEIA-ME.txt
+│   │
+│   ├── 📋 listas/                      # CONTATOS CSV
+│   │   ├── lista-atual.csv             # Contatos para prospecção
+│   │   └── exemplo.csv                 # Exemplo de formato
+│   │
+│   ├── 🔧 scripts/                     # SCRIPTS AUXILIARES
+│   │   └── README.md                   # Documentação de scripts
+│   │
+│   ├── 🐳 Dockerfile                   # Imagem Docker do backend
+│   ├── 🐳 docker-compose.yml           # Orquestração com Docker
+│   └── 🚀 entrypoint.sh                # Script de inicialização do container
+│
+├── 🎨 frontend/                        # INTERFACE WEB
+│   │
+│   └── 📱 public/                      # PAINÉIS HTML
+│       ├── index.html                  # Painel principal
+│       ├── dashboard.html              # Dashboard de métricas
+│       ├── qrcodes.html                # QR Codes para conectar WhatsApp
+│       ├── analytics.html              # Analytics e gráficos
+│       ├── simple.html                 # Painel simplificado
+│       ├── status.html                 # Status do bot
+│       └── diagnostico-teste.html      # Teste de diagnóstico
+│
+├── 📚 docs/                            # DOCUMENTAÇÃO
+│   ├── STATUS-ATUAL.md                 # Estado atual do projeto
+│   ├── ROTEIRO_ROBUSTO.md              # Fluxo de conversação
+│   ├── PLAYBOOK-DE-VENDAS.md           # Estratégia comercial
+│   └── CONFIGURAR-GEMINI.md            # Como configurar IA
+│
+└── 📁 node_modules/                    # Dependências (gitignored)
+
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                            COMO INICIAR O BOT                                  ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+1️⃣  CONFIGURAR VARIÁVEIS:
+   cp .env.example backend/config/.env
+   # Editar backend/config/.env com suas credenciais
+
+2️⃣  INICIAR LOCALMENTE (Node.js):
+   ./start.sh                    # Linux/Mac
+   start.bat                     # Windows
+
+3️⃣  INICIAR COM DOCKER:
+   cd backend
+   docker-compose up -d
+   docker-compose logs -f
+
+4️⃣  ACESSAR PAINEL:
+   http://localhost:3099
+
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                          ORGANIZAÇÃO DE CAMADAS                                ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+ENTRADA:
+├── ./start.sh / ./start.bat          → Inicia backend/index.js
+└── docker-compose up                 → Inicia via Docker
+
+BACKEND (backend/):
+├── index.js                          → Aplicação principal
+├── modules/*.js                      → Lógica de negócio
+├── config/.env                       → Configurações
+├── conhecimento/                     → Base de conhecimento
+├── listas/                           → Contatos
+└── scripts/                          → Scripts auxiliares
+
+FRONTEND (frontend/public/):
+└── *.html                            → Painéis web
+
+DOCUMENTAÇÃO (docs/):
+└── *.md                              → Guias e referências
+
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                          O QUE FAZER AGORA?                                    ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+✅ Estrutura pronta
+✅ Código organizado
+✅ Documentação completa
+✅ Scripts de inicialização
+
+PRÓXIMOS PASSOS:
+
+1. Configurar .env com suas credenciais
+2. Executar ./start.sh (ou start.bat)
+3. Escanear QR Code no painel
+4. Preparar lista de contatos em backend/listas/
+5. Ativar prospecção em PROSPECCAO_ATIVA=true
+
+═══════════════════════════════════════════════════════════════════════════════════
+
+📧 Para mais informações, consulte docs/STATUS-ATUAL.md
+🤖 Bot pronto para uso em produção!
