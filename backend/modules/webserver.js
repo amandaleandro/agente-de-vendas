@@ -70,43 +70,63 @@ const server = http.createServer((req, res) => {
       }
 
       if (url === '/qr') {
-        try {
-          const qrcodeText = fs.readFileSync(path.join(__dirname, '..', 'qrcode.txt'), 'utf8');
-          const html = `<!DOCTYPE html>
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(`<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <title>Scan QR - Fezinha</title>
     <style>
-        body { font-family: Arial; text-align: center; padding: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: white; }
-        .box { background: white; color: #333; padding: 40px; border-radius: 15px; max-width: 600px; margin: 0 auto; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
-        h1 { font-size: 2em; margin-bottom: 20px; }
-        .qr { background: #f0f0f0; padding: 20px; margin: 20px 0; border: 2px dashed #667eea; border-radius: 10px; font-family: monospace; word-break: break-all; max-height: 300px; overflow-y: auto; font-size: 11px; }
-        .btn { background: #667eea; color: white; padding: 15px 30px; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; width: 100%; margin: 10px 0; }
-        .btn:hover { opacity: 0.9; }
-        .status { padding: 15px; background: #d4edda; border-radius: 8px; margin: 20px 0; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial; text-align: center; padding: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: white; display: flex; align-items: center; justify-content: center; }
+        .box { background: white; color: #333; padding: 40px; border-radius: 15px; max-width: 600px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+        h1 { font-size: 2.5em; margin-bottom: 10px; color: #667eea; }
+        .sub { font-size: 1.1em; color: #666; margin-bottom: 30px; }
+        .qr { background: #f8f9ff; padding: 20px; margin: 20px 0; border: 3px dashed #667eea; border-radius: 10px; font-family: monospace; word-break: break-all; max-height: 250px; overflow-y: auto; font-size: 10px; line-height: 1.4; color: #333; }
+        .btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; width: 100%; margin: 10px 0; transition: all 0.3s; }
+        .btn:hover { transform: scale(1.02); box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4); }
+        .status { padding: 15px; background: #d4edda; border-radius: 8px; margin-bottom: 20px; font-weight: 600; color: #155724; }
+        .info { background: #f0f2ff; padding: 15px; border-radius: 8px; margin-top: 20px; font-size: 0.9em; color: #555; text-align: left; }
+        .info h3 { color: #667eea; margin-bottom: 10px; }
+        .info ol { margin-left: 20px; line-height: 1.8; }
     </style>
 </head>
 <body>
     <div class="box">
-        <h1>🤖 Fezinha</h1>
-        <p>Vincule seu WhatsApp</p>
-        <div class="status">✅ QR Code Pronto!</div>
-        <div class="qr">${qrcodeText}</div>
-        <a href="${qrcodeText}" class="btn">✅ Abrir WhatsApp</a>
-        <button class="btn" onclick="location.reload()">🔄 Recarregar</button>
-        <p style="margin-top: 30px; font-size: 0.9em;">Aponte a câmera do celular para o QR acima</p>
+        <h1>🤖 Fezinha Bot</h1>
+        <div class="sub">Vincule seu WhatsApp</div>
+        <div class="status" id="status">✅ QR Code Pronto!</div>
+        <div class="qr" id="qr">Carregando QR Code...</div>
+        <button class="btn" onclick="location.reload()">🔄 Atualizar</button>
+        <div class="info">
+            <h3>📱 Como conectar:</h3>
+            <ol>
+                <li>Abra <strong>WhatsApp</strong> no seu celular</li>
+                <li>Vá em <strong>Configurações → Dispositivos vinculados</strong></li>
+                <li>Clique em <strong>Vincular dispositivo</strong></li>
+                <li>Aponte a câmera para o QR acima</li>
+            </ol>
+        </div>
     </div>
-</body>
-</html>`;
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-          res.end(html);
-          return;
-        } catch (err) {
-          res.writeHead(500, { 'Content-Type': 'text/plain' });
-          res.end('QR Code não disponível');
-          return;
+    <script>
+        async function carregarQR() {
+            try {
+                const response = await fetch('/api/qrcode-text');
+                const data = await response.json();
+                if (data.qrcode) {
+                    document.getElementById('qr').textContent = data.qrcode;
+                }
+            } catch (e) {
+                document.getElementById('qr').textContent = '❌ Erro ao carregar QR Code';
+                setTimeout(carregarQR, 3000);
+            }
         }
+        carregarQR();
+        setInterval(carregarQR, 5000);
+    </script>
+</body>
+</html>`);
+        return;
       }
 
       if (url === '/api/status') {
@@ -133,14 +153,12 @@ const server = http.createServer((req, res) => {
       return json(404, { error: 'Endpoint não encontrado' });
     }
 
-    // Serve Frontend Static Files
-    let filePath = path.join(__dirname, '..', 'frontend', 'public', url === '/' ? 'index.html' : url.substring(1));
-
-    // Check if file exists
+    // Serve Frontend React Static Files
+    let filePath = path.join(__dirname, '..', '..', 'frontend', 'dist', url === '/' ? 'index.html' : url);
+    
+    // Check if file exists, if not fallback to index.html (React Router)
     if (!fs.existsSync(filePath)) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Arquivo não encontrado: ' + url);
-      return;
+      filePath = path.join(__dirname, '..', '..', 'frontend', 'dist', 'index.html');
     }
 
     const extname = String(path.extname(filePath)).toLowerCase();
