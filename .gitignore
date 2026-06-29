@@ -1,69 +1,73 @@
 # ========================================
-# NODE.JS
-# ========================================
-node_modules/
-npm-debug.log
-yarn-error.log
-.npm
-.node_repl_history
-
-# ========================================
-# AMBIENTE & CHAVES
+# 🚫 NÃO COMMITIR - DADOS SENSÍVEIS
 # ========================================
 .env
 .env.local
 .env.*.local
-.env.prod
-.env.production
-.env.development
 *.pem
 *.key
 *.cert
 secrets/
 
 # ========================================
-# DOCKER & VOLUMES
+# 🚫 NÃO COMMITIR - SESSÕES & AUTH
 # ========================================
-# Dados locais (não commitir dados de produção)
-auth_info_baileys/
 sessions/
-backups/
-logs/
-listas/*.csv
-conhecimento/
+auth_info_baileys/
+auth_info/
+.wwebjs_cache/
+*.qr
+qrcode.txt
 
 # ========================================
-# IDE & EDITOR
+# 🚫 NÃO COMMITIR - LOGS & BACKUPS
+# ========================================
+logs/
+backups/
+*.log
+npm-debug.log
+yarn-error.log
+
+# ========================================
+# 🚫 NÃO COMMITIR - BANCO DE DADOS
+# ========================================
+postgres_data/
+*.sql.gz
+*.sql
+!scripts/init-db.sql
+
+# ========================================
+# 🚫 NÃO COMMITIR - ARQUIVOS GERADOS
+# ========================================
+listas/*.csv
+conhecimento/
+cache/
+temp/
+tmp/
+.tmp/
+dist/
+build/
+out/
+coverage/
+.nyc_output/
+
+# ========================================
+# 🚫 NÃO COMMITIR - IDE & EDITOR
 # ========================================
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.DS_Store
 .project
 .classpath
 .c9/
 *.launch
 .settings/
-.env.local.php
-.env.*.php
 .history
 
 # ========================================
-# APLICAÇÃO ESPECÍFICA
-# ========================================
-.claude/
-.claude-history
-history.jsonl
-auth_info/
-sessions/
-cache/
-temp/
-tmp/
-
-# ========================================
-# SISTEMA
+# 🚫 NÃO COMMITIR - SISTEMA
 # ========================================
 .DS_Store
 .AppleDouble
@@ -75,42 +79,27 @@ Thumbs.db
 .vimrc
 
 # ========================================
-# BUILD & DIST
+# 🚫 NÃO COMMITIR - NODE & BUILD
 # ========================================
-dist/
-build/
-out/
+node_modules/
+.npm
+.node_repl_history
 .next/
 .nuxt/
-coverage/
-.nyc_output/
 
 # ========================================
-# TESTING
-# ========================================
-.mocha
-.nyc_output
-coverage
-*.lcov
-
-# ========================================
-# DOCUMENTATION BUILDS
-# ========================================
-docs/_build/
-site/
-dist/docs/
-
-# ========================================
-# PIPELINE & CI/CD
+# 🚫 NÃO COMMITIR - CI/CD
 # ========================================
 .github/workflows/*.log
 .gitlab-ci.log
 
 # ========================================
-# DADOS SENSÍVEIS
+# 🚫 NÃO COMMITIR - CLAUDE & TESTING
 # ========================================
-*.sql.gz
-*.sql
-!scripts/init-db.sql
-postgres_data/
+.claude/
+.claude-history
+history.jsonl
+.mocha
+coverage
+*.lcov
 leads_pendentes.jsonl
