@@ -3,11 +3,16 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copiar package.json
+# Instalar dependências do backend
 COPY package.json package-lock.json ./
-
-# Instalar dependências
 RUN npm ci --only=production
+
+# Instalar e buildar o frontend
+COPY frontend ./frontend
+WORKDIR /app/frontend
+RUN npm install
+RUN npm run build
+WORKDIR /app
 
 # ========================================
 # Stage final
@@ -18,11 +23,14 @@ WORKDIR /app
 # Instalar ferramentas essenciais
 RUN apk add --no-cache curl
 
-# Copiar dependências do builder
+# Copiar dependências do backend do builder
 COPY --from=builder /app/node_modules ./node_modules
 
-# Copiar código
+# Copiar código do backend
 COPY . .
+
+# Sobrescrever a pasta frontend com a versão buildada do builder
+COPY --from=builder /app/frontend/dist ./frontend/dist
 
 # Criar diretórios necessários
 RUN mkdir -p logs backups listas conhecimento sessions auth_info_baileys
