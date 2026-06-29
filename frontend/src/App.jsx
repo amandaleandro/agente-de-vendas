@@ -20,13 +20,13 @@ function App() {
             <NavLink to="/dashboard" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <LayoutDashboard size={20} /> Dashboard
             </NavLink>
-            <NavLink to="/conexao" className={({ isActive }) => \`nav-link \${isActive ? 'active' : ''}\`}>
+            <NavLink to="/conexao" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Smartphone size={20} /> Conexão WhatsApp
             </NavLink>
-            <NavLink to="/prospeccao" className={({ isActive }) => \`nav-link \${isActive ? 'active' : ''}\`}>
+            <NavLink to="/prospeccao" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Users size={20} /> Prospecção & IA
             </NavLink>
-            <NavLink to="/configuracao" className={({ isActive }) => \`nav-link \${isActive ? 'active' : ''}\`}>
+            <NavLink to="/configuracao" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Settings size={20} /> Configurações
             </NavLink>
           </div>
