@@ -43,7 +43,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 'bold' }}>
-            {status ? \`\${status.numerosConectados} / \${status.numerosConfigurados}\` : '...'}
+            {status ? `${status.numerosConectados} / ${status.numerosConfigurados}` : '...'}
           </div>
         </div>
 
