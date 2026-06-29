@@ -21,6 +21,7 @@ const ratelimiter = require('./modules/ratelimit');
 const DiagnosticoManager = require('./modules/diagnostico-manager');
 const DiagnosticoPrompt = require('./modules/diagnostico-prompt');
 const ProspeccaoHistorico = require('./modules/prospeccao-historico');
+const ProspeccaoAgenda = require('./modules/prospeccao-agenda');
 require('dotenv').config({ path: require('path').join(__dirname, 'config', '.env') });
 
 let sock;
@@ -94,6 +95,7 @@ const metrics = new MetricsManager();
 const security = new SecurityManager();
 const diagnosticoPrompt = new DiagnosticoPrompt();
 const prospeccaoHistorico = new ProspeccaoHistorico(__dirname);
+const prospeccaoAgenda = new ProspeccaoAgenda(__dirname);
 let diagnosticoManager = null; // Será inicializado após pool estar pronto
 
 const INSTRUCOES_GEMINI = `Você é Fezinha, assistente comercial do FechaPro. Seu objetivo é UMA COISA: fechar vendas com naturalidade.
@@ -329,6 +331,105 @@ async function executarProspeccao() {
     }
     await new Promise(resolve => setTimeout(resolve, intervalo));
   }
+}
+
+/**
+ * Executa prospecção com agenda (múltiplas planilhas, uma por hora)
+ */
+async function executarProspeccaoAgendada() {
+  // Se modo tradicional (uma planilha por env), usar função antiga
+  if (process.env.PROSPECCAO_CSV && !process.env.PROSPECCAO_AGENDA_ATIVA) {
+    return executarProspeccao();
+  }
+
+  // Modo agenda: carregar múltiplas planilhas
+  if (process.env.PROSPECCAO_AGENDA_ATIVA !== 'true') return;
+
+  // Se fila vazia, criar fila com todas as planilhas
+  if (prospeccaoAgenda.fila.length === 0 && !prospeccaoAgenda.planilhaAtual) {
+    prospeccaoAgenda.criarFila();
+  }
+
+  // Obter próxima planilha a executar
+  const planilha = prospeccaoAgenda.obterProxima();
+  if (!planilha) {
+    if (prospeccaoAgenda.fila.length === 0 && !prospeccaoAgenda.planilhaAtual) {
+      console.log('ℹ️  Nenhuma planilha para executar. Coloque CSVs em backend/listas/');
+    }
+    return;
+  }
+
+  // Executar prospecção da planilha
+  const leads = planilha.contatos;
+  console.log(`\nProspecção: ${leads.length} contatos encontrados`);
+  console.log('Prévia:', leads.slice(0, 3).map(({ nome, telefone, categoria }) => ({ nome, telefone, categoria })));
+
+  if (process.env.PROSPECCAO_ATIVA !== 'true') {
+    console.log('Prospecção em modo de prévia. Defina PROSPECCAO_ATIVA=true para enviar.\n');
+    prospeccaoAgenda.marcarConcluida(0, 0);
+    return;
+  }
+
+  // Filtrar leads que já foram enviados
+  const leadsNovos = prospeccaoHistorico.filtrarLeadsNovos(leads);
+  console.log(`📞 Enviando para ${leadsNovos.length} contatos novos\n`);
+
+  // Verificar reset diário do warmup
+  const hoje = new Date().toDateString();
+  if (ultimoResetWarmup !== hoje) {
+    warmup.resetarDia();
+    ultimoResetWarmup = hoje;
+    console.log('🔄 Contadores diários de warmup resetados');
+  }
+
+  const intervalo = Math.max(180000, Number(process.env.PROSPECCAO_INTERVALO_MS) || 180000);
+  let indiceSocket = 0;
+  let enviados = 0;
+  let erros = 0;
+
+  for (const lead of leadsNovos) {
+    const sockets = [...socketsConectados.entries()];
+    if (!sockets.length) {
+      console.log('⚠️  Nenhum WhatsApp conectado. Pausando prospecção.');
+      prospeccaoAgenda.marcarConcluida(enviados, erros);
+      return;
+    }
+
+    // Encontrar um socket que tenha quota disponível
+    let [sessao, socketEnvio] = sockets[indiceSocket++ % sockets.length];
+    let tentativas = 0;
+    while (!warmup.podeEnviar(sessao) && tentativas < sockets.length) {
+      const status = warmup.obterStatusWarmup(sessao);
+      console.log(`⏸️  Sessão ${sessao} atingiu limite (${status.enviados}/${status.quota}). Tentando outro...`);
+      [sessao, socketEnvio] = sockets[indiceSocket++ % sockets.length];
+      tentativas++;
+    }
+
+    if (!warmup.podeEnviar(sessao)) {
+      console.log(`❌ Todos os números atingiram limite diário. Parando.`);
+      break;
+    }
+
+    try {
+      const consulta = await socketEnvio.onWhatsApp(lead.telefone);
+      if (!consulta?.[0]?.exists) throw new Error('número não está no WhatsApp');
+      const identidade = identidadeDaSessao(sessao);
+      const mensagem = await criarMensagemProspeccao(lead, identidade);
+      await enviarPeloBot(socketEnvio, `${lead.telefone}@s.whatsapp.net`, { text: mensagem }, sessao);
+      registrarProspeccao({ ...lead, status: 'enviado', mensagem, sessao, perfil: identidade.nome });
+      const status = warmup.obterStatusWarmup(sessao);
+      console.log(`✅ ${lead.nome} (${status.enviados}/${status.quota})`);
+      enviados++;
+    } catch (err) {
+      registrarProspeccao({ ...lead, status: 'erro', erro: err.message });
+      console.log(`⚠️  ${lead.nome}: ${err.message}`);
+      erros++;
+    }
+    await new Promise(resolve => setTimeout(resolve, intervalo));
+  }
+
+  // Marcar planilha como concluída
+  prospeccaoAgenda.marcarConcluida(enviados, erros);
 }
 
 
@@ -1171,6 +1272,32 @@ function iniciarBackupAutomatico() {
   setTimeout(() => backup.gerarBackup(), 5000);
 }
 
+function iniciarProspeccaoAgendada() {
+  if (process.env.PROSPECCAO_AGENDA_ATIVA !== 'true' && !process.env.PROSPECCAO_CSV) {
+    return;
+  }
+
+  // Executar a cada 30 segundos para verificar se precisa rodar próxima planilha
+  const INTERVALO_VERIFICACAO = 30 * 1000; // 30 segundos
+  let prospeccaoEmAndamento = false;
+
+  setInterval(async () => {
+    if (prospeccaoEmAndamento) return;
+    if (socketsConectados.size === 0) return;
+
+    prospeccaoEmAndamento = true;
+    try {
+      await executarProspeccaoAgendada();
+    } catch (err) {
+      console.error('❌ Erro na prospecção agendada:', err.message);
+    } finally {
+      prospeccaoEmAndamento = false;
+    }
+  }, INTERVALO_VERIFICACAO);
+
+  console.log('✅ Prospecção agendada iniciada (verifica a cada 30 segundos)');
+}
+
 function iniciarManutencaoPeriodicaDeCache() {
   setInterval(() => {
     cache.limparExpirados();
@@ -1217,6 +1344,7 @@ async function iniciar() {
   iniciarLimpezaPeriodicaDeMemoria();
   iniciarHealthCheck();
   iniciarBackupAutomatico();
+  iniciarProspeccaoAgendada();
   iniciarManutencaoPeriodicaDeCache();
 
   // Tentar sincronizar leads que ficaram pendentes
