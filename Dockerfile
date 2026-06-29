@@ -43,7 +43,7 @@ ENV LOG_LEVEL=info
 
 # Health check (deve vir antes de ENTRYPOINT e CMD)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3099/health || exit 1
+  CMD curl -f http://localhost:3099/api/status || exit 1
 
-# Iniciar aplicação (painel web + api server + bot)
-CMD ["sh", "-c", "node painel.js & node server-api.js & node index.js"]
+# Iniciar aplicação (api server + frontend + bot unificados)
+CMD ["node", "index.js"]

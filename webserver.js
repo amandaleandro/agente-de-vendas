@@ -4,62 +4,122 @@ const path = require('path');
 
 const PORT = 3099;
 
+const MIME_TYPES = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.wav': 'audio/wav',
+  '.mp4': 'video/mp4',
+  '.woff': 'application/font-woff',
+  '.ttf': 'application/font-ttf',
+  '.eot': 'application/vnd.ms-fontobject',
+  '.otf': 'application/font-otf',
+  '.wasm': 'application/wasm'
+};
+
 const server = http.createServer((req, res) => {
-  console.log(`📨 ${req.method} ${req.url}`);
+  console.log(`📨 [API] ${req.method} ${req.url}`);
 
   try {
-    // Servir qrcodes.html como padrão
-    if (req.url === '/' || req.url === '/qrcodes.html') {
-      const filePath = path.join(__dirname, 'public', 'qrcodes.html');
-      const content = fs.readFileSync(filePath, 'utf-8');
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(content);
-      return;
+    const json = (status, dados) => {
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(dados));
+    };
+
+    const url = req.url.split('?')[0];
+
+    // API Routes
+    if (url.startsWith('/api/')) {
+      if (url === '/api/whatsapp-status') {
+        const numeros = Number(process.env.WHATSAPP_NUMEROS) || 1;
+        const statusList = [];
+        for (let i = 1; i <= numeros; i++) {
+          const sessao = `fezinha-${i}`;
+          const temQR = global.qrPorSessao && global.qrPorSessao.has(sessao);
+          const conectado = global.socketsConectados && global.socketsConectados.has(sessao);
+          const nome = process.env[`WHATSAPP_${i}_NOME`] || `Número ${i}`;
+          statusList.push({ sessao, nome, conectado, temQR, numero: i });
+        }
+        return json(200, { 
+          status: statusList, 
+          total: numeros, 
+          conectados: global.socketsConectados ? global.socketsConectados.size : 0,
+          conectado: (global.socketsConectados ? global.socketsConectados.size : 0) > 0,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      if (url === '/api/qrcodes') {
+        const qrcodes = global.qrPorSessao ? Object.fromEntries(global.qrPorSessao) : {};
+        return json(200, { qrcodes });
+      }
+
+      if (url === '/api/status') {
+        return json(200, {
+          conectado: (global.socketsConectados ? global.socketsConectados.size : 0) > 0,
+          numerosConectados: global.socketsConectados ? global.socketsConectados.size : 0,
+          numerosConfigurados: Number(process.env.WHATSAPP_NUMEROS) || 1,
+          mensagem: 'Bot funcionando perfeitamente integrado ao React',
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Fallback for missing APIs
+      return json(404, { error: 'Endpoint não encontrado' });
     }
 
-    // Servir status.html também
-    if (req.url === '/status.html') {
-      const filePath = path.join(__dirname, 'public', 'status.html');
-      const content = fs.readFileSync(filePath, 'utf-8');
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(content);
-      return;
+    // Serve Frontend React Static Files
+    let filePath = path.join(__dirname, 'frontend', 'dist', url === '/' ? 'index.html' : url);
+    
+    // Check if file exists, if not fallback to index.html (React Router)
+    if (!fs.existsSync(filePath)) {
+      filePath = path.join(__dirname, 'frontend', 'dist', 'index.html');
     }
 
-    // API /api/status
-    if (req.url === '/api/status') {
-      const response = JSON.stringify({
-        conectado: true,
-        numerosConectados: 1,
-        numerosConfigurados: 4,
-        mensagem: 'Bot funcionando normalmente',
-        timestamp: new Date().toISOString()
-      });
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(response);
-      return;
-    }
+    const extname = String(path.extname(filePath)).toLowerCase();
+    const contentType = MIME_TYPES[extname] || 'application/octet-stream';
 
-    // 404
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Página não encontrada');
+    fs.readFile(filePath, (error, content) => {
+      if (error) {
+        if(error.code == 'ENOENT') {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('Página não encontrada. Execute npm run build no frontend.');
+        } else {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Erro interno do servidor: ' + error.code);
+        }
+      } else {
+        res.writeHead(200, { 'Content-Type': contentType });
+        res.end(content, 'utf-8');
+      }
+    });
+
   } catch (error) {
-    console.error('❌ Erro:', error.message);
+    console.error('❌ Erro no Webserver:', error.message);
     res.writeHead(500, { 'Content-Type': 'text/plain' });
     res.end('Erro interno do servidor');
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`\n✅ Servidor web rodando em http://localhost:${PORT}\n`);
-});
+function startServer() {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n✅ SERVIDOR WEB E API RODANDO EM http://localhost:${PORT}\n`);
+  });
 
-server.on('error', (err) => {
-  console.error('❌ Erro do servidor:', err);
-  process.exit(1);
-});
+  server.on('error', (err) => {
+    console.error('❌ Erro do servidor web:', err);
+  });
+}
 
-process.on('uncaughtException', (err) => {
-  console.error('❌ Erro não capturado:', err);
-  process.exit(1);
-});
+// Se o arquivo for rodado diretamente, inicializa o servidor. 
+// Caso seja exportado (pelo index.js), permite inicialização controlada.
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = { startServer };

@@ -1268,6 +1268,9 @@ async function iniciar() {
   console.log('');
   const quantidadeNumeros = Math.max(1, Math.min(10, Number(process.env.WHATSAPP_NUMEROS) || 1));
   for (let sessao = 1; sessao <= quantidadeNumeros; sessao++) await conectar(sessao);
+
+  // Inicializa a API e o Frontend Unificado
+  require('./webserver').startServer();
 }
 
 iniciar().catch(console.log);
