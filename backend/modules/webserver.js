@@ -96,9 +96,16 @@ const server = http.createServer((req, res) => {
     // Serve Frontend Static Files
     let filePath = path.join(__dirname, '..', 'frontend', 'public', url === '/' ? 'index.html' : url);
 
-    // Check if file exists, if not fallback to index.html
+    // Check if file exists
     if (!fs.existsSync(filePath)) {
-      filePath = path.join(__dirname, '..', 'frontend', 'public', 'index.html');
+      // Only fallback to index.html for root requests or .html files without extension
+      if (url === '/' || (!url.includes('.') && !url.includes('/'))) {
+        filePath = path.join(__dirname, '..', 'frontend', 'public', 'index.html');
+      } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Arquivo não encontrado');
+        return;
+      }
     }
 
     const extname = String(path.extname(filePath)).toLowerCase();

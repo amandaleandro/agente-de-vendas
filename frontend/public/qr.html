@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code WhatsApp</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+        p {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+        .qr-text {
+            background: #f8f9ff;
+            border: 2px dashed #667eea;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            font-family: monospace;
+            font-size: 0.7em;
+            color: #333;
+            word-break: break-all;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1em;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        .btn:hover {
+            transform: scale(1.02);
+        }
+        .info {
+            background: #d1ecf1;
+            border-left: 4px solid #0c5460;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            text-align: left;
+        }
+        .emoji { font-size: 3em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="emoji">🤖</div>
+        <h1>Fezinha Bot</h1>
+        <p>Vincule seu WhatsApp</p>
+
+        <div class="qr-text" id="qrText">
+            Carregando QR Code...
+        </div>
+
+        <a href="" id="whatsappLink" class="btn">
+            ✅ Abrir WhatsApp
+        </a>
+
+        <button class="btn" onclick="recarregar()">
+            🔄 Recarregar
+        </button>
+
+        <div class="info">
+            <strong>📱 Como usar:</strong><br>
+            1. Clique no botão "Abrir WhatsApp"<br>
+            2. Ou aponte a câmera para o texto acima
+        </div>
+    </div>
+
+    <script>
+        async function carregarQR() {
+            try {
+                // Tentar API
+                const response = await fetch('/api/qrcode-text');
+                const data = await response.json();
+
+                if (data.qrcode) {
+                    document.getElementById('qrText').textContent = data.qrcode;
+                    document.getElementById('whatsappLink').href = data.qrcode;
+                    return;
+                }
+            } catch (e) {
+                console.log('API não respondeu, tentando arquivo...');
+            }
+
+            // Fallback: tentar ler arquivo diretamente
+            try {
+                const response = await fetch('/api/qrcode-text');
+                const data = await response.json();
+                if (data.qrcode) {
+                    document.getElementById('qrText').textContent = data.qrcode;
+                    document.getElementById('whatsappLink').href = data.qrcode;
+                }
+            } catch (e) {
+                document.getElementById('qrText').textContent =
+                    '❌ QR Code não disponível\n\nTente recarregar a página em alguns segundos.';
+            }
+        }
+
+        function recarregar() {
+            location.reload();
+        }
+
+        carregarQR();
+        // Recarregar a cada 5 segundos
+        setInterval(carregarQR, 5000);
+    </script>
+</body>
+</html>
