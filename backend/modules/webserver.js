@@ -60,6 +60,15 @@ const server = http.createServer((req, res) => {
         return json(200, { qrcodes });
       }
 
+      if (url === '/api/qrcode-text') {
+        try {
+          const qrcodeText = fs.readFileSync(path.join(__dirname, '..', 'qrcode.txt'), 'utf8');
+          return json(200, { qrcode: qrcodeText });
+        } catch (err) {
+          return json(404, { error: 'QR Code não disponível' });
+        }
+      }
+
       if (url === '/api/status') {
         return json(200, {
           conectado: (global.socketsConectados ? global.socketsConectados.size : 0) > 0,
