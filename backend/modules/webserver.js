@@ -69,6 +69,46 @@ const server = http.createServer((req, res) => {
         }
       }
 
+      if (url === '/qr') {
+        try {
+          const qrcodeText = fs.readFileSync(path.join(__dirname, '..', 'qrcode.txt'), 'utf8');
+          const html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Scan QR - Fezinha</title>
+    <style>
+        body { font-family: Arial; text-align: center; padding: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: white; }
+        .box { background: white; color: #333; padding: 40px; border-radius: 15px; max-width: 600px; margin: 0 auto; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+        h1 { font-size: 2em; margin-bottom: 20px; }
+        .qr { background: #f0f0f0; padding: 20px; margin: 20px 0; border: 2px dashed #667eea; border-radius: 10px; font-family: monospace; word-break: break-all; max-height: 300px; overflow-y: auto; font-size: 11px; }
+        .btn { background: #667eea; color: white; padding: 15px 30px; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; width: 100%; margin: 10px 0; }
+        .btn:hover { opacity: 0.9; }
+        .status { padding: 15px; background: #d4edda; border-radius: 8px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>🤖 Fezinha</h1>
+        <p>Vincule seu WhatsApp</p>
+        <div class="status">✅ QR Code Pronto!</div>
+        <div class="qr">${qrcodeText}</div>
+        <a href="${qrcodeText}" class="btn">✅ Abrir WhatsApp</a>
+        <button class="btn" onclick="location.reload()">🔄 Recarregar</button>
+        <p style="margin-top: 30px; font-size: 0.9em;">Aponte a câmera do celular para o QR acima</p>
+    </div>
+</body>
+</html>`;
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(html);
+          return;
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('QR Code não disponível');
+          return;
+        }
+      }
+
       if (url === '/api/status') {
         return json(200, {
           conectado: (global.socketsConectados ? global.socketsConectados.size : 0) > 0,
@@ -94,18 +134,13 @@ const server = http.createServer((req, res) => {
     }
 
     // Serve Frontend Static Files
-    let filePath = path.join(__dirname, '..', 'frontend', 'public', url === '/' ? 'index.html' : url);
+    let filePath = path.join(__dirname, '..', 'frontend', 'public', url === '/' ? 'index.html' : url.substring(1));
 
     // Check if file exists
     if (!fs.existsSync(filePath)) {
-      // Only fallback to index.html for root requests or .html files without extension
-      if (url === '/' || (!url.includes('.') && !url.includes('/'))) {
-        filePath = path.join(__dirname, '..', 'frontend', 'public', 'index.html');
-      } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Arquivo não encontrado');
-        return;
-      }
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Arquivo não encontrado: ' + url);
+      return;
     }
 
     const extname = String(path.extname(filePath)).toLowerCase();
