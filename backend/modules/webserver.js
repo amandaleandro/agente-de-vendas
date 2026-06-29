@@ -72,7 +72,11 @@ const server = http.createServer((req, res) => {
 
       // Prospecção API
       if (url.startsWith('/api/prospeccao/') && global.prospeccaoAgenda && global.apiPerspeccao) {
-        await global.apiPerspeccao.processar(req, res, url);
+        global.apiPerspeccao.processar(req, res, url).catch(err => {
+          console.error('❌ Erro na API de prospecção:', err);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
         return;
       }
 
