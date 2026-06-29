@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fezinha - QR Codes</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode.js/1.5.3/qrcode.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 28px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        .qr-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .qr-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            text-align: center;
+            transition: transform 0.3s ease;
+        }
+        .qr-card:hover {
+            transform: translateY(-5px);
+        }
+        .qr-card.conectado {
+            border: 3px solid #4CAF50;
+            background: #f0fff0;
+        }
+        .qr-card h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+        .qr-code {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            display: inline-block;
+            margin: 15px 0;
+            min-height: 250px;
+            min-width: 250px;
+        }
+        .status {
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        .status.aguardando {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status.conectado {
+            background: #d4edda;
+            color: #155724;
+        }
+        .info {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin-top: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        .info h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+        .info ol {
+            margin-left: 20px;
+            line-height: 1.8;
+        }
+        .info li {
+            margin-bottom: 10px;
+        }
+        .loading {
+            text-align: center;
+            color: white;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 Fezinha - Conectar WhatsApp</h1>
+
+        <div class="qr-grid" id="qr-container">
+            <div class="loading">Carregando QR codes...</div>
+        </div>
+
+        <div class="info">
+            <h3>📖 Como Conectar:</h3>
+            <ol>
+                <li><strong>No celular:</strong> Abra WhatsApp → Configurações → Aparelhos vinculados</li>
+                <li><strong>Clique em:</strong> "Vincular um aparelho"</li>
+                <li><strong>Aponte a câmera:</strong> Para o QR code abaixo</li>
+                <li><strong>Aguarde:</strong> A conexão será confirmada em 10-20 segundos</li>
+                <li><strong>Repita:</strong> Para os 4 números (Amanda, Yzak, Marina, Lucas)</li>
+            </ol>
+        </div>
+
+        <div class="info" style="margin-top: 15px;">
+            <h3>⚡ Status da Prospecção:</h3>
+            <p id="status-info">Conectando ao bot...</p>
+        </div>
+    </div>
+
+    <script>
+        const DADOS_QR = {
+            1: { nome: 'Amanda', estilo: 'acolhedora, direta' },
+            2: { nome: 'Yzak', estilo: 'consultivo, descontraído' },
+            3: { nome: 'Marina', estilo: 'consultiva, empática' },
+            4: { nome: 'Lucas', estilo: 'direto, estratégico' }
+        };
+
+        function gerarDadosQR(numero) {
+            // Gerar dados de teste para demonstração
+            return `fezinha:${numero}:${Date.now()}`;
+        }
+
+        function criarCartaoQR(numero, conectado = false) {
+            const dados = DADOS_QR[numero];
+            const qrData = gerarDadosQR(numero);
+
+            const cartao = document.createElement('div');
+            cartao.className = `qr-card ${conectado ? 'conectado' : ''}`;
+            cartao.innerHTML = `
+                <h2>🤖 ${dados.nome}</h2>
+                <p style="color: #666; font-size: 13px;">${dados.estilo}</p>
+                <div id="qr-${numero}" class="qr-code"></div>
+                <div class="status ${conectado ? 'conectado' : 'aguardando'}">
+                    ${conectado ? '✅ Conectado!' : '⏳ Aguardando QR code...'}
+                </div>
+            `;
+
+            return cartao;
+        }
+
+        function inicializarQRCodes() {
+            const container = document.getElementById('qr-container');
+            container.innerHTML = '';
+
+            // Adicionar cartões para os 4 números
+            for (let i = 1; i <= 4; i++) {
+                const cartao = criarCartaoQR(i, i === 1); // Apenas #1 já conectado
+                container.appendChild(cartao);
+            }
+
+            // Gerar QR codes com a biblioteca qrcode.js
+            for (let i = 1; i <= 4; i++) {
+                const elementoQR = document.getElementById(`qr-${i}`);
+                try {
+                    new QRCode(elementoQR, {
+                        text: gerarDadosQR(i),
+                        width: 250,
+                        height: 250,
+                        colorDark: '#000000',
+                        colorLight: '#ffffff',
+                        correctLevel: QRCode.CorrectLevel.H
+                    });
+                } catch (e) {
+                    elementoQR.innerHTML = `<p style="color: #999;">Erro ao gerar QR code</p>`;
+                }
+            }
+        }
+
+        function verificarStatus() {
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    const statusEl = document.getElementById('status-info');
+                    if (data.conectado) {
+                        statusEl.innerHTML = `
+                            ✅ <strong>${data.numerosConectados}/${data.numerosConfigurados}</strong> números conectados<br>
+                            🚀 Prospecção: ${data.executando ? 'ATIVA' : 'Aguardando...'}
+                        `;
+                    } else {
+                        statusEl.innerHTML = '⏳ Aguardando conexão do bot...';
+                    }
+                })
+                .catch(() => {
+                    document.getElementById('status-info').innerHTML = '⚠️ Aguardando conexão com o bot...';
+                });
+        }
+
+        // Inicializar quando a página carregar
+        window.addEventListener('load', () => {
+            inicializarQRCodes();
+            verificarStatus();
+            setInterval(verificarStatus, 5000);
+        });
+    </script>
+</body>
+</html>

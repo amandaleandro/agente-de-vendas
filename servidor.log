@@ -1,0 +1,9 @@
+
+╔════════════════════════════════════════════════════════════╗
+║                 🌐 SERVIDOR WEB INICIADO                   ║
+╚════════════════════════════════════════════════════════════╝
+
+✅ Servidor rodando em http://localhost:3099
+📊 Acesse o dashboard: http://localhost:3099
+🔌 API de status: http://localhost:3099/api/status
+

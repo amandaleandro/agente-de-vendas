@@ -1,0 +1,116 @@
+# ========================================
+# NODE.JS
+# ========================================
+node_modules/
+npm-debug.log
+yarn-error.log
+.npm
+.node_repl_history
+
+# ========================================
+# AMBIENTE & CHAVES
+# ========================================
+.env
+.env.local
+.env.*.local
+.env.prod
+.env.production
+.env.development
+*.pem
+*.key
+*.cert
+secrets/
+
+# ========================================
+# DOCKER & VOLUMES
+# ========================================
+# Dados locais (não commitir dados de produção)
+auth_info_baileys/
+sessions/
+backups/
+logs/
+listas/*.csv
+conhecimento/
+
+# ========================================
+# IDE & EDITOR
+# ========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+.env.local.php
+.env.*.php
+.history
+
+# ========================================
+# APLICAÇÃO ESPECÍFICA
+# ========================================
+.claude/
+.claude-history
+history.jsonl
+auth_info/
+sessions/
+cache/
+temp/
+tmp/
+
+# ========================================
+# SISTEMA
+# ========================================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+.vimrc
+
+# ========================================
+# BUILD & DIST
+# ========================================
+dist/
+build/
+out/
+.next/
+.nuxt/
+coverage/
+.nyc_output/
+
+# ========================================
+# TESTING
+# ========================================
+.mocha
+.nyc_output
+coverage
+*.lcov
+
+# ========================================
+# DOCUMENTATION BUILDS
+# ========================================
+docs/_build/
+site/
+dist/docs/
+
+# ========================================
+# PIPELINE & CI/CD
+# ========================================
+.github/workflows/*.log
+.gitlab-ci.log
+
+# ========================================
+# DADOS SENSÍVEIS
+# ========================================
+*.sql.gz
+*.sql
+!scripts/init-db.sql
+postgres_data/
+leads_pendentes.jsonl

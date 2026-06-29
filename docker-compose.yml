@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  fezinha:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fezinha-app
+    ports:
+      - "3099:3099"
+    env_file:
+      - .env.docker
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DEBUG=${DEBUG:-false}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-agentefecha}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - XAI_API_KEY=${XAI_API_KEY}
+      - PAINEL_API_KEY=${PAINEL_API_KEY}
+      - IA_PROVIDER=${IA_PROVIDER:-gemini}
+      - PROSPECCAO_ATIVA=${PROSPECCAO_ATIVA:-true}
+      - FRONTEND_PORTA=${FRONTEND_PORTA:-3099}
+      - WHATSAPP_NUMEROS=${WHATSAPP_NUMEROS:-1}
+      - WHATSAPP_1_NOME=${WHATSAPP_1_NOME:-Fezinha}
+      - WHATSAPP_1_ESTILO=${WHATSAPP_1_ESTILO:-acolhedora, direta e espontânea}
+      - NODE_OPTIONS=--max-old-space-size=1024 --max-http-header-size=16384 --disable-warning=MaxListenersExceeded
+    volumes:
+      - ./auth_info_baileys:/app/auth_info_baileys
+      - ./sessions:/app/sessions
+      - ./listas:/app/listas
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+      - ./conhecimento:/app/conhecimento
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 2G
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3099/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - fezinha-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: fezinha-db
+    env_file:
+      - .env.docker
+    environment:
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME:-agentefecha}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5437:5432"
+    restart: unless-stopped
+    networks:
+      - fezinha-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+
+networks:
+  fezinha-network:
+    driver: bridge
