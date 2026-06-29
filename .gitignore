@@ -12,9 +12,9 @@ secrets/
 # ========================================
 # 🚫 NÃO COMMITIR - SESSÕES & AUTH
 # ========================================
-sessions/
-auth_info_baileys/
-auth_info/
+backend/sessions/
+backend/auth_info_baileys/
+backend/auth_info/
 .wwebjs_cache/
 *.qr
 qrcode.txt
@@ -22,8 +22,8 @@ qrcode.txt
 # ========================================
 # 🚫 NÃO COMMITIR - LOGS & BACKUPS
 # ========================================
-logs/
-backups/
+backend/logs/
+backend/backups/
 *.log
 npm-debug.log
 yarn-error.log
@@ -34,14 +34,14 @@ yarn-error.log
 postgres_data/
 *.sql.gz
 *.sql
-!scripts/init-db.sql
+!backend/scripts/init-db.sql
 
 # ========================================
 # 🚫 NÃO COMMITIR - ARQUIVOS GERADOS
 # ========================================
-listas/*.csv
-conhecimento/
-cache/
+backend/listas/*.csv
+backend/conhecimento/
+backend/cache/
 temp/
 tmp/
 .tmp/

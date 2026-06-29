@@ -8,19 +8,19 @@ const mammoth = require('mammoth');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const WarmupManager = require('./warmup');
-const MessageTank = require('./tank');
-const MetricsManager = require('./metrics');
-const SecurityManager = require('./security');
-const { lerCsv } = require('./csv');
-const logger = require('./logger');
-const HealthCheck = require('./healthcheck');
-const backup = require('./backup');
-const CacheManager = require('./cache');
-const ratelimiter = require('./ratelimit');
-const DiagnosticoManager = require('./diagnostico-manager');
-const DiagnosticoPrompt = require('./diagnostico-prompt');
-require('dotenv').config();
+const WarmupManager = require('./modules/warmup');
+const MessageTank = require('./modules/tank');
+const MetricsManager = require('./modules/metrics');
+const SecurityManager = require('./modules/security');
+const { lerCsv } = require('./modules/csv');
+const logger = require('./modules/logger');
+const HealthCheck = require('./modules/healthcheck');
+const backup = require('./modules/backup');
+const CacheManager = require('./modules/cache');
+const ratelimiter = require('./modules/ratelimit');
+const DiagnosticoManager = require('./modules/diagnostico-manager');
+const DiagnosticoPrompt = require('./modules/diagnostico-prompt');
+require('dotenv').config({ path: require('path').join(__dirname, 'config', '.env') });
 
 let sock;
 const socketsConectados = new Map();
@@ -1270,7 +1270,7 @@ async function iniciar() {
   for (let sessao = 1; sessao <= quantidadeNumeros; sessao++) await conectar(sessao);
 
   // Inicializa a API e o Frontend Unificado
-  require('./webserver').startServer();
+  require('./modules/webserver').startServer();
 }
 
 iniciar().catch(console.log);
