@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  fezinha:
+    build: .
+    container_name: fezinha-bot
+    ports:
+      - "3099:3099"
+    environment:
+      - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=2048
+      - PROSPECCAO_ATIVA=${PROSPECCAO_ATIVA:-true}
+      - PROSPECCAO_AGENDA_ATIVA=${PROSPECCAO_AGENDA_ATIVA:-true}
+      - WHATSAPP_NUMEROS=${WHATSAPP_NUMEROS:-1}
+      - WHATSAPP_1_NOME=${WHATSAPP_1_NOME:-Fezinha Bot}
+      - IA_PROVIDER=${IA_PROVIDER:-gemini}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - XAI_API_KEY=${XAI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    volumes:
+      - ./backend/sessions:/app/backend/sessions
+      - ./backend/backups:/app/backend/backups
+      - ./backend/arquivos:/app/backend/arquivos
+    restart: unless-stopped
+    networks:
+      - fezinha-network
+
+networks:
+  fezinha-network:
+    driver: bridge
