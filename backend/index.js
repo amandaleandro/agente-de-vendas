@@ -20,6 +20,7 @@ const CacheManager = require('./modules/cache');
 const ratelimiter = require('./modules/ratelimit');
 const DiagnosticoManager = require('./modules/diagnostico-manager');
 const DiagnosticoPrompt = require('./modules/diagnostico-prompt');
+const ProspeccaoHistorico = require('./modules/prospeccao-historico');
 require('dotenv').config({ path: require('path').join(__dirname, 'config', '.env') });
 
 let sock;
@@ -92,6 +93,7 @@ const TEMPO_RETORNO_IA_MS = 10 * 60 * 1000;
 const metrics = new MetricsManager();
 const security = new SecurityManager();
 const diagnosticoPrompt = new DiagnosticoPrompt();
+const prospeccaoHistorico = new ProspeccaoHistorico(__dirname);
 let diagnosticoManager = null; // Será inicializado após pool estar pronto
 
 const INSTRUCOES_GEMINI = `Você é Fezinha, assistente comercial do FechaPro. Seu objetivo é UMA COISA: fechar vendas com naturalidade.
@@ -259,7 +261,11 @@ async function criarMensagemProspeccao(lead, identidade = identidadeDaSessao(1))
 }
 
 function registrarProspeccao(registro) {
-  fs.appendFileSync('prospeccao_resultados.jsonl', `${JSON.stringify({ ...registro, data: new Date().toISOString() })}\n`, 'utf8');
+  if (registro.status === 'erro') {
+    prospeccaoHistorico.registrarErro(registro);
+  } else {
+    prospeccaoHistorico.registrarEnvio(registro);
+  }
 }
 
 async function executarProspeccao() {
@@ -270,27 +276,10 @@ async function executarProspeccao() {
   console.log('Prévia:', leads.slice(0, 3).map(({ nome, telefone, categoria }) => ({ nome, telefone, categoria })));
   if (process.env.PROSPECCAO_ATIVA !== 'true') { console.log('Prospecção em modo de prévia. Defina PROSPECCAO_ATIVA=true para enviar.\n'); return; }
 
-  // NOVO: Carregar histórico de envios anteriores para evitar duplicatas
-  const contatosJaEnviados = new Set();
-  const arquivoResultados = 'prospeccao_resultados.jsonl';
-  if (fs.existsSync(arquivoResultados)) {
-    try {
-      const linhas = fs.readFileSync(arquivoResultados, 'utf8').split('\n').filter(l => l.trim());
-      linhas.forEach(linha => {
-        const resultado = JSON.parse(linha);
-        if (resultado.telefone) {
-          contatosJaEnviados.add(resultado.telefone);
-        }
-      });
-      console.log(`✅ Carregado histórico: ${contatosJaEnviados.size} contatos já prospectados`);
-    } catch (err) {
-      console.log('⚠️  Erro ao carregar histórico:', err.message);
-    }
-  }
-
   // Filtrar leads que já foram enviados
-  const leadsNovos = leads.filter(lead => !contatosJaEnviados.has(lead.telefone));
-  console.log(`📞 Enviando apenas para ${leadsNovos.length} contatos novos (${contatosJaEnviados.size} já foram prospectados)\n`);
+  const leadsNovos = prospeccaoHistorico.filtrarLeadsNovos(leads);
+  const relatorioAnterior = prospeccaoHistorico.obterRelatorio();
+  console.log(`📞 Enviando apenas para ${leadsNovos.length} contatos novos (${relatorioAnterior.total_prospectados} já foram prospectados)\n`);
 
   // Verificar reset diário do warmup
   const hoje = new Date().toDateString();
