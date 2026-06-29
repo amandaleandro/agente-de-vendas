@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>📅 Agenda de Prospecção - Fezinha Bot</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      color: white;
+      margin-bottom: 30px;
+    }
+
+    header h1 {
+      font-size: 2.5em;
+      margin-bottom: 10px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 25px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+    }
+
+    .card h2 {
+      color: #333;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #667eea;
+    }
+
+    /* Upload Card */
+    .upload-area {
+      border: 2px dashed #667eea;
+      border-radius: 8px;
+      padding: 30px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      background: #f8f9ff;
+    }
+
+    .upload-area:hover {
+      border-color: #764ba2;
+      background: #f0f2ff;
+    }
+
+    .upload-area.dragging {
+      border-color: #764ba2;
+      background: #e8ecff;
+    }
+
+    .upload-area input {
+      display: none;
+    }
+
+    .upload-icon {
+      font-size: 3em;
+      margin-bottom: 10px;
+    }
+
+    .upload-text {
+      color: #666;
+      margin-bottom: 10px;
+    }
+
+    .upload-hint {
+      font-size: 0.85em;
+      color: #999;
+    }
+
+    /* Button Styles */
+    .btn {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1em;
+      transition: all 0.3s ease;
+      margin-top: 15px;
+      width: 100%;
+    }
+
+    .btn:hover {
+      transform: scale(1.02);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-secondary {
+      background: #e0e7ff;
+      color: #667eea;
+      margin-left: 10px;
+    }
+
+    .btn-secondary:hover {
+      background: #c7d2ff;
+    }
+
+    /* File List */
+    .file-list {
+      margin-top: 20px;
+    }
+
+    .file-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      background: #f8f9ff;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      border-left: 4px solid #667eea;
+    }
+
+    .file-name {
+      color: #333;
+      font-weight: 500;
+    }
+
+    .file-count {
+      background: #667eea;
+      color: white;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.85em;
+      margin-right: 10px;
+    }
+
+    .file-delete {
+      background: #ff6b6b;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85em;
+    }
+
+    .file-delete:hover {
+      background: #ff5252;
+    }
+
+    /* Status Card */
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    .status-box {
+      background: #f8f9ff;
+      padding: 15px;
+      border-radius: 8px;
+      text-align: center;
+      border-left: 4px solid #667eea;
+    }
+
+    .status-label {
+      color: #666;
+      font-size: 0.9em;
+      margin-bottom: 5px;
+    }
+
+    .status-value {
+      font-size: 2em;
+      font-weight: bold;
+      color: #333;
+    }
+
+    /* Progress Bar */
+    .progress-container {
+      margin-top: 20px;
+    }
+
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      color: #666;
+      font-size: 0.9em;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background: #e0e7ff;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+      transition: width 0.3s ease;
+    }
+
+    /* Current Spreadsheet */
+    .current-sheet {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 20px;
+    }
+
+    .sheet-name {
+      font-size: 1.3em;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    .sheet-info {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 15px;
+      margin-top: 15px;
+      font-size: 0.9em;
+    }
+
+    /* Queue List */
+    .queue-list {
+      max-height: 400px;
+      overflow-y: auto;
+      border: 1px solid #e0e7ff;
+      border-radius: 6px;
+      padding: 10px;
+    }
+
+    .queue-item {
+      padding: 10px;
+      border-left: 3px solid #667eea;
+      margin-bottom: 8px;
+      background: #f8f9ff;
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .queue-item.completed {
+      border-left-color: #51cf66;
+      background: #f1fdf4;
+    }
+
+    .queue-number {
+      background: #667eea;
+      color: white;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8em;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+
+    .queue-number.completed {
+      background: #51cf66;
+    }
+
+    /* Loading Spinner */
+    .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Messages */
+    .message {
+      padding: 15px;
+      border-radius: 6px;
+      margin-bottom: 15px;
+      display: none;
+    }
+
+    .message.show {
+      display: block;
+    }
+
+    .message.success {
+      background: #d4edda;
+      color: #155724;
+      border-left: 4px solid #28a745;
+    }
+
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border-left: 4px solid #f5c6cb;
+    }
+
+    .message.info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border-left: 4px solid #bee5eb;
+    }
+
+    /* Full-width grid for all spreadsheets */
+    .full-width {
+      grid-column: 1 / -1;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📅 Agenda de Prospecção</h1>
+      <p>Gerencie múltiplas planilhas automaticamente</p>
+    </header>
+
+    <div id="message" class="message"></div>
+
+    <div class="grid">
+      <!-- Upload Section -->
+      <div class="card">
+        <h2>📤 Upload de Planilhas</h2>
+        <div class="upload-area" id="uploadArea">
+          <div class="upload-icon">📁</div>
+          <div class="upload-text">Clique ou arraste arquivos CSV aqui</div>
+          <div class="upload-hint">Selecione múltiplos arquivos de uma vez</div>
+          <input type="file" id="fileInput" multiple accept=".csv" />
+        </div>
+        <div id="fileList" class="file-list"></div>
+        <button class="btn" id="uploadBtn">📤 Enviar Arquivos</button>
+        <button class="btn btn-secondary" id="clearBtn">🗑️ Limpar Tudo</button>
+      </div>
+
+      <!-- Controls Section -->
+      <div class="card">
+        <h2>⚙️ Controles</h2>
+        <button class="btn" id="startBtn">▶️ Iniciar Prospecção</button>
+        <button class="btn btn-secondary" id="pauseBtn">⏸️ Pausar</button>
+        <button class="btn btn-secondary" id="exportBtn">💾 Exportar Relatório</button>
+      </div>
+    </div>
+
+    <!-- Status Section -->
+    <div class="card">
+      <h2>📊 Status da Agenda</h2>
+      <div class="status-grid">
+        <div class="status-box">
+          <div class="status-label">Total de Planilhas</div>
+          <div class="status-value" id="totalSheets">0</div>
+        </div>
+        <div class="status-box">
+          <div class="status-label">Concluídas</div>
+          <div class="status-value" id="completedSheets" style="color: #51cf66;">0</div>
+        </div>
+        <div class="status-box">
+          <div class="status-label">Pendentes</div>
+          <div class="status-value" id="pendingSheets" style="color: #ffa94d;">0</div>
+        </div>
+        <div class="status-box">
+          <div class="status-label">Total de Contatos</div>
+          <div class="status-value" id="totalContacts">0</div>
+        </div>
+        <div class="status-box">
+          <div class="status-label">Enviados</div>
+          <div class="status-value" id="sentContacts" style="color: #51cf66;">0</div>
+        </div>
+        <div class="status-box">
+          <div class="status-label">Erros</div>
+          <div class="status-value" id="errorContacts" style="color: #ff6b6b;">0</div>
+        </div>
+      </div>
+
+      <div class="progress-container">
+        <div class="progress-label">
+          <span>Progresso Geral</span>
+          <span><span id="percentual">0</span>%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <div class="current-sheet" id="currentSheet" style="display: none;">
+        <div class="sheet-name" id="currentSheetName">--</div>
+        <div class="sheet-info">
+          <div>📄 Contatos: <span id="currentContacts">0</span></div>
+          <div>✅ Enviados: <span id="currentSent">0</span></div>
+          <div>⏱️ Próxima: <span id="nextExecution">--</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Queue Section -->
+    <div class="card full-width">
+      <h2>📋 Fila de Planilhas</h2>
+      <div class="queue-list" id="queueList">
+        <p style="color: #999; text-align: center; padding: 20px;">Nenhuma planilha carregada</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = 'http://localhost:3099/api';
+    let filesToUpload = [];
+    let statusInterval = null;
+
+    // Upload Area
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const fileList = document.getElementById('fileList');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    uploadArea.addEventListener('click', () => fileInput.click());
+
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('dragging');
+    });
+
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.classList.remove('dragging');
+    });
+
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragging');
+      handleFiles(e.dataTransfer.files);
+    });
+
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+    function handleFiles(files) {
+      filesToUpload = Array.from(files).filter(f => f.name.endsWith('.csv'));
+      updateFileList();
+    }
+
+    function updateFileList() {
+      fileList.innerHTML = '';
+      filesToUpload.forEach((file, index) => {
+        const item = document.createElement('div');
+        item.className = 'file-item';
+        item.innerHTML = `
+          <span class="file-name">📄 ${file.name}</span>
+          <button class="file-delete" onclick="removeFile(${index})">❌ Remover</button>
+        `;
+        fileList.appendChild(item);
+      });
+    }
+
+    window.removeFile = function(index) {
+      filesToUpload.splice(index, 1);
+      updateFileList();
+    };
+
+    uploadBtn.addEventListener('click', async () => {
+      if (filesToUpload.length === 0) {
+        showMessage('Selecione pelo menos um arquivo CSV', 'error');
+        return;
+      }
+
+      uploadBtn.disabled = true;
+      uploadBtn.innerHTML = '<span class="spinner"></span> Enviando...';
+
+      try {
+        const formData = new FormData();
+        filesToUpload.forEach(file => formData.append('files', file));
+
+        const response = await fetch(`${API}/prospeccao/upload`, {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          showMessage(`✅ ${filesToUpload.length} arquivo(s) enviado(s) com sucesso!`, 'success');
+          filesToUpload = [];
+          fileInput.value = '';
+          updateFileList();
+          loadStatus();
+        } else {
+          showMessage(`❌ Erro: ${data.error}`, 'error');
+        }
+      } catch (err) {
+        showMessage(`❌ Erro ao enviar: ${err.message}`, 'error');
+      } finally {
+        uploadBtn.disabled = false;
+        uploadBtn.innerHTML = '📤 Enviar Arquivos';
+      }
+    });
+
+    clearBtn.addEventListener('click', async () => {
+      if (!confirm('Tem certeza que quer limpar tudo?')) return;
+
+      try {
+        const response = await fetch(`${API}/prospeccao/limpar`, {
+          method: 'POST'
+        });
+
+        if (response.ok) {
+          showMessage('✅ Agenda limpa com sucesso!', 'success');
+          loadStatus();
+        }
+      } catch (err) {
+        showMessage(`❌ Erro: ${err.message}`, 'error');
+      }
+    });
+
+    // Controls
+    document.getElementById('startBtn').addEventListener('click', async () => {
+      await startProspeccao();
+    });
+
+    document.getElementById('pauseBtn').addEventListener('click', async () => {
+      await pauseProspeccao();
+    });
+
+    document.getElementById('exportBtn').addEventListener('click', async () => {
+      await exportReport();
+    });
+
+    async function startProspeccao() {
+      try {
+        const response = await fetch(`${API}/prospeccao/iniciar`, {
+          method: 'POST'
+        });
+
+        if (response.ok) {
+          showMessage('✅ Prospecção iniciada!', 'success');
+          startStatusUpdates();
+        }
+      } catch (err) {
+        showMessage(`❌ Erro: ${err.message}`, 'error');
+      }
+    }
+
+    async function pauseProspeccao() {
+      try {
+        const response = await fetch(`${API}/prospeccao/pausar`, {
+          method: 'POST'
+        });
+
+        if (response.ok) {
+          showMessage('⏸️ Prospecção pausada!', 'info');
+          stopStatusUpdates();
+        }
+      } catch (err) {
+        showMessage(`❌ Erro: ${err.message}`, 'error');
+      }
+    }
+
+    async function exportReport() {
+      try {
+        const response = await fetch(`${API}/prospeccao/relatorio`);
+        const data = await response.json();
+        const json = JSON.stringify(data, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'relatorio_agenda.json';
+        a.click();
+        showMessage('✅ Relatório exportado!', 'success');
+      } catch (err) {
+        showMessage(`❌ Erro: ${err.message}`, 'error');
+      }
+    }
+
+    async function loadStatus() {
+      try {
+        const response = await fetch(`${API}/prospeccao/status`);
+        const data = await response.json();
+        updateStatus(data);
+      } catch (err) {
+        console.error('Erro ao carregar status:', err);
+      }
+    }
+
+    function updateStatus(data) {
+      document.getElementById('totalSheets').textContent = data.total_planilhas || 0;
+      document.getElementById('completedSheets').textContent = data.concluidas || 0;
+      document.getElementById('pendingSheets').textContent = (data.total_planilhas || 0) - (data.concluidas || 0);
+      document.getElementById('totalContacts').textContent = data.total_contatos || 0;
+      document.getElementById('sentContacts').textContent = data.total_enviados || 0;
+      document.getElementById('errorContacts').textContent = data.total_erros || 0;
+
+      const percentual = data.total_planilhas > 0
+        ? Math.round((data.concluidas / data.total_planilhas) * 100)
+        : 0;
+      document.getElementById('percentual').textContent = percentual;
+      document.getElementById('progressFill').style.width = percentual + '%';
+
+      updateQueue(data.planilhas || []);
+      updateCurrentSheet(data.planilha_atual, data.proxima_execucao);
+    }
+
+    function updateQueue(planilhas) {
+      const queueList = document.getElementById('queueList');
+
+      if (planilhas.length === 0) {
+        queueList.innerHTML = '<p style="color: #999; text-align: center; padding: 20px;">Nenhuma planilha carregada</p>';
+        return;
+      }
+
+      queueList.innerHTML = planilhas.map((p, idx) => `
+        <div class="queue-item ${p.status === 'concluída' ? 'completed' : ''}">
+          <div style="display: flex; align-items: center; flex: 1;">
+            <div class="queue-number ${p.status === 'concluída' ? 'completed' : ''}">${idx + 1}</div>
+            <div style="flex: 1;">
+              <div style="font-weight: 500;">${p.nome}</div>
+              <div style="font-size: 0.85em; opacity: 0.7;">${p.contatos_totais || 0} contatos</div>
+            </div>
+          </div>
+          <div style="text-align: right; font-size: 0.9em;">
+            ${p.status === 'concluída'
+              ? `✅ ${p.contatos_enviados || 0}/${p.contatos_totais || 0}`
+              : '⏳ Pendente'
+            }
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function updateCurrentSheet(current, proximaExecucao) {
+      const sheet = document.getElementById('currentSheet');
+      if (current) {
+        sheet.style.display = 'block';
+        document.getElementById('currentSheetName').textContent = `▶️ ${current}`;
+        document.getElementById('nextExecution').textContent = proximaExecucao || '--';
+      } else {
+        sheet.style.display = 'none';
+      }
+    }
+
+    function showMessage(text, type) {
+      const message = document.getElementById('message');
+      message.className = `message show ${type}`;
+      message.textContent = text;
+      setTimeout(() => message.classList.remove('show'), 5000);
+    }
+
+    function startStatusUpdates() {
+      if (statusInterval) clearInterval(statusInterval);
+      statusInterval = setInterval(loadStatus, 2000);
+    }
+
+    function stopStatusUpdates() {
+      if (statusInterval) clearInterval(statusInterval);
+    }
+
+    // Load initial status
+    loadStatus();
+    startStatusUpdates();
+  </script>
+</body>
+</html>

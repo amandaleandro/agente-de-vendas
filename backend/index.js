@@ -22,6 +22,7 @@ const DiagnosticoManager = require('./modules/diagnostico-manager');
 const DiagnosticoPrompt = require('./modules/diagnostico-prompt');
 const ProspeccaoHistorico = require('./modules/prospeccao-historico');
 const ProspeccaoAgenda = require('./modules/prospeccao-agenda');
+const APIPerspeccao = require('./modules/api-prospeccao');
 require('dotenv').config({ path: require('path').join(__dirname, 'config', '.env') });
 
 let sock;
@@ -29,9 +30,11 @@ const socketsConectados = new Map();
 const qrPorSessao = new Map();
 let qrGenerated = false;
 
-// Exportar para global para que server-api.js possa acessar
+// Exportar para global para que APIs possam acessar
 global.socketsConectados = socketsConectados;
 global.qrPorSessao = qrPorSessao;
+global.prospeccaoAgenda = null; // Será inicializado depois
+global.apiPerspeccao = null; // Será inicializado depois
 const etapasPorContato = new Map();
 const historicosPorContato = new Map();
 const atendimentosHumanos = new Set();
@@ -95,7 +98,9 @@ const metrics = new MetricsManager();
 const security = new SecurityManager();
 const diagnosticoPrompt = new DiagnosticoPrompt();
 const prospeccaoHistorico = new ProspeccaoHistorico(__dirname);
-const prospeccaoAgenda = new ProspeccaoAgenda(__dirname);
+const prospeccaoAgendaLocal = new ProspeccaoAgenda(__dirname);
+global.prospeccaoAgenda = prospeccaoAgendaLocal; // Exportar para APIs
+global.apiPerspeccao = new APIPerspeccao(prospeccaoAgendaLocal); // Exportar para APIs
 let diagnosticoManager = null; // Será inicializado após pool estar pronto
 
 const INSTRUCOES_GEMINI = `Você é Fezinha, assistente comercial do FechaPro. Seu objetivo é UMA COISA: fechar vendas com naturalidade.
@@ -346,14 +351,14 @@ async function executarProspeccaoAgendada() {
   if (process.env.PROSPECCAO_AGENDA_ATIVA !== 'true') return;
 
   // Se fila vazia, criar fila com todas as planilhas
-  if (prospeccaoAgenda.fila.length === 0 && !prospeccaoAgenda.planilhaAtual) {
-    prospeccaoAgenda.criarFila();
+  if (prospeccaoAgendaLocal.fila.length === 0 && !prospeccaoAgendaLocal.planilhaAtual) {
+    prospeccaoAgendaLocal.criarFila();
   }
 
   // Obter próxima planilha a executar
-  const planilha = prospeccaoAgenda.obterProxima();
+  const planilha = prospeccaoAgendaLocal.obterProxima();
   if (!planilha) {
-    if (prospeccaoAgenda.fila.length === 0 && !prospeccaoAgenda.planilhaAtual) {
+    if (prospeccaoAgendaLocal.fila.length === 0 && !prospeccaoAgendaLocal.planilhaAtual) {
       console.log('ℹ️  Nenhuma planilha para executar. Coloque CSVs em backend/listas/');
     }
     return;
@@ -366,7 +371,7 @@ async function executarProspeccaoAgendada() {
 
   if (process.env.PROSPECCAO_ATIVA !== 'true') {
     console.log('Prospecção em modo de prévia. Defina PROSPECCAO_ATIVA=true para enviar.\n');
-    prospeccaoAgenda.marcarConcluida(0, 0);
+    prospeccaoAgendaLocal.marcarConcluida(0, 0);
     return;
   }
 
@@ -391,7 +396,7 @@ async function executarProspeccaoAgendada() {
     const sockets = [...socketsConectados.entries()];
     if (!sockets.length) {
       console.log('⚠️  Nenhum WhatsApp conectado. Pausando prospecção.');
-      prospeccaoAgenda.marcarConcluida(enviados, erros);
+      prospeccaoAgendaLocal.marcarConcluida(enviados, erros);
       return;
     }
 
@@ -429,7 +434,7 @@ async function executarProspeccaoAgendada() {
   }
 
   // Marcar planilha como concluída
-  prospeccaoAgenda.marcarConcluida(enviados, erros);
+  prospeccaoAgendaLocal.marcarConcluida(enviados, erros);
 }
 
 

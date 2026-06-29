@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const APIPerspeccao = require('./api-prospeccao');
 
 const PORT = 3099;
 
@@ -69,16 +70,22 @@ const server = http.createServer((req, res) => {
         });
       }
 
+      // Prospecção API
+      if (url.startsWith('/api/prospeccao/') && global.prospeccaoAgenda && global.apiPerspeccao) {
+        await global.apiPerspeccao.processar(req, res, url);
+        return;
+      }
+
       // Fallback for missing APIs
       return json(404, { error: 'Endpoint não encontrado' });
     }
 
-    // Serve Frontend React Static Files
-    let filePath = path.join(__dirname, 'frontend', 'dist', url === '/' ? 'index.html' : url);
-    
-    // Check if file exists, if not fallback to index.html (React Router)
+    // Serve Frontend Static Files
+    let filePath = path.join(__dirname, '..', 'frontend', 'public', url === '/' ? 'index.html' : url);
+
+    // Check if file exists, if not fallback to index.html
     if (!fs.existsSync(filePath)) {
-      filePath = path.join(__dirname, 'frontend', 'dist', 'index.html');
+      filePath = path.join(__dirname, '..', 'frontend', 'public', 'index.html');
     }
 
     const extname = String(path.extname(filePath)).toLowerCase();
