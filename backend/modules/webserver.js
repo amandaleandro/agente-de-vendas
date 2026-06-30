@@ -234,6 +234,14 @@ const server = http.createServer((req, res) => {
             if (global.atendimentosHumanos) {
               global.atendimentosHumanos.delete(`${sessao}:${jid}`);
             }
+            if (global.retomadasPendentes) {
+              const pendente = global.retomadasPendentes.get(`${sessao}:${jid}`);
+              if (pendente?.timer) clearTimeout(pendente.timer);
+              global.retomadasPendentes.delete(`${sessao}:${jid}`);
+            }
+            if (global.historicosPorContato) {
+              global.historicosPorContato.delete(`${sessao}:${jid}`);
+            }
             
             // Se retomou a IA, limpar badge
             if (chatStore.setRequiresAttention) {
@@ -260,8 +268,35 @@ const server = http.createServer((req, res) => {
 
       if (url === '/api/analytics/dados') {
         try {
+          const ARQUIVO_PROSPECCAO = path.join(__dirname, '..', 'listas', 'prospeccao_resultados.jsonl');
+          const ARQUIVO_AGENDA = path.join(__dirname, '..', 'listas', 'prospeccao_agenda.json');
+          const ARQUIVO_TREINAMENTO = path.join(__dirname, '..', 'conhecimento', 'mensagens_treinamento.jsonl');
+          const normalizarTelefone = (valor) => {
+            let tel = String(valor || '').split('@')[0].replace(/\D/g, '');
+            if ((tel.length === 10 || tel.length === 11) && !tel.startsWith('55')) tel = `55${tel}`;
+            return tel;
+          };
+          const formatarDuracao = (ms) => {
+            if (!Number.isFinite(ms) || ms < 0) return '0min';
+            const totalSegundos = Math.round(ms / 1000);
+            const horas = Math.floor(totalSegundos / 3600);
+            const minutos = Math.floor((totalSegundos % 3600) / 60);
+            const segundos = totalSegundos % 60;
+            if (horas > 0) return `${horas}h ${minutos}min`;
+            if (minutos > 0) return `${minutos}min ${segundos}s`;
+            return `${segundos}s`;
+          };
+          const incrementar = (mapa, chave, dadosBase = {}) => {
+            if (!mapa.has(chave)) mapa.set(chave, { ...dadosBase, total: 0 });
+            mapa.get(chave).total++;
+            return mapa.get(chave);
+          };
+
           const leadsEnviados = new Map(); // telefone -> { nome, empresa, data_envio }
-          let totalProspectados = 0;
+          const ultimosEnvios = [];
+          const mensagensPorTelefone = new Map();
+          const mensagensPorNumeroDia = new Map();
+          const mensagensPorNumeroHora = new Map();
           
           if (fs.existsSync(ARQUIVO_PROSPECCAO)) {
             const linhas = fs.readFileSync(ARQUIVO_PROSPECCAO, 'utf8').split('\n').filter(l => l.trim());
@@ -269,21 +304,90 @@ const server = http.createServer((req, res) => {
               try {
                 const reg = JSON.parse(linha);
                 if (reg.status === 'enviado' && reg.telefone) {
-                  // normaliza telefone (remove + e @s.whatsapp.net se houver)
-                  let tel = reg.telefone.replace(/\D/g, '');
-                  leadsEnviados.set(tel, {
+                  const tel = normalizarTelefone(reg.telefone);
+                  if (!leadsEnviados.has(tel) || new Date(reg.data) < new Date(leadsEnviados.get(tel).data)) {
+                    leadsEnviados.set(tel, {
+                      telefone: tel,
+                      nome: reg.nome || 'Desconhecido',
+                      empresa: reg.empresa || reg['empresa/nome'] || 'N/A',
+                      data: reg.data
+                    });
+                  }
+                  ultimosEnvios.push({
                     telefone: tel,
                     nome: reg.nome || 'Desconhecido',
-                    empresa: reg.empresa || 'N/A',
-                    data: reg.data
+                    empresa: reg.empresa || reg['empresa/nome'] || 'N/A',
+                    data: reg.data,
+                    sessao: reg.sessao || 1,
+                    perfil: reg.perfil || ''
                   });
-                  totalProspectados++;
+
+                  const dataEnvio = new Date(reg.data || reg.timestamp || Date.now());
+                  const dia = dataEnvio.toISOString().slice(0, 10);
+                  const hora = `${dia} ${String(dataEnvio.getHours()).padStart(2, '0')}:00`;
+                  const numero = `Sessao ${reg.sessao || 1}`;
+                  const porTelefone = incrementar(mensagensPorTelefone, tel, {
+                    telefone: tel,
+                    nome: reg.nome || 'Desconhecido',
+                    empresa: reg.empresa || reg['empresa/nome'] || 'N/A',
+                    ultima_data: reg.data
+                  });
+                  porTelefone.ultima_data = reg.data;
+                  incrementar(mensagensPorNumeroDia, `${numero}|${dia}`, { numero, dia });
+                  incrementar(mensagensPorNumeroHora, `${numero}|${hora}`, { numero, hora });
                 }
-              } catch(e){}
+              } catch(e) {}
             });
           }
 
+          const planilhas = [];
+          if (fs.existsSync(ARQUIVO_AGENDA)) {
+            try {
+              const agenda = JSON.parse(fs.readFileSync(ARQUIVO_AGENDA, 'utf8'));
+              const statusPlanilhas = agenda.statusPlanilhas || {};
+              Object.entries(statusPlanilhas).forEach(([nome, status]) => {
+                const inicio = status.inicio ? new Date(status.inicio) : null;
+                const fim = status.fim ? new Date(status.fim) : (status.status === 'executando' ? new Date() : null);
+                const duracaoMs = inicio && fim ? fim - inicio : 0;
+                planilhas.push({
+                  nome,
+                  status: status.status,
+                  inicio: status.inicio || null,
+                  fim: status.fim || null,
+                  duracao_ms: duracaoMs,
+                  duracao: formatarDuracao(duracaoMs),
+                  contatos_totais: status.contatos_totais || 0,
+                  contatos_enviados: status.contatos_enviados || 0,
+                  erros: status.erros || 0
+                });
+              });
+            } catch(e) {}
+          }
+
+          const planilhasComDuracao = planilhas.filter(p => p.duracao_ms > 0);
+          const duracaoMediaMs = planilhasComDuracao.length > 0
+            ? Math.round(planilhasComDuracao.reduce((sum, p) => sum + p.duracao_ms, 0) / planilhasComDuracao.length)
+            : 0;
+
           const leadsQueResponderam = new Map(); // telefone -> { ...dados_lead, total_mensagens, ultima_mensagem }
+          const registrarResposta = (telefone, texto, timestamp = Date.now()) => {
+            const tel = normalizarTelefone(telefone);
+            if (!tel || !leadsEnviados.has(tel)) return;
+
+            if (!leadsQueResponderam.has(tel)) {
+              leadsQueResponderam.set(tel, {
+                ...leadsEnviados.get(tel),
+                total_mensagens: 0,
+                ultima_mensagem: texto,
+                ultima_resposta_em: new Date(timestamp).toISOString()
+              });
+            }
+
+            const lead = leadsQueResponderam.get(tel);
+            lead.total_mensagens++;
+            lead.ultima_mensagem = texto;
+            lead.ultima_resposta_em = new Date(timestamp).toISOString();
+          };
           
           if (fs.existsSync(ARQUIVO_TREINAMENTO)) {
             const linhas = fs.readFileSync(ARQUIVO_TREINAMENTO, 'utf8').split('\n').filter(l => l.trim());
@@ -291,27 +395,24 @@ const server = http.createServer((req, res) => {
               try {
                 const reg = JSON.parse(linha);
                 if (!reg.enviada_pelo_bot && reg.contato) {
-                  let tel = reg.contato.split('@')[0].replace(/\D/g, '');
-                  
-                  // Se o cara que enviou a msg é um lead nosso
-                  if (leadsEnviados.has(tel)) {
-                    if (!leadsQueResponderam.has(tel)) {
-                      leadsQueResponderam.set(tel, {
-                        ...leadsEnviados.get(tel),
-                        total_mensagens: 0,
-                        ultima_mensagem: reg.texto
-                      });
-                    }
-                    const l = leadsQueResponderam.get(tel);
-                    l.total_mensagens++;
-                    l.ultima_mensagem = reg.texto;
-                  }
+                  registrarResposta(reg.contato, reg.texto || '', reg.timestamp || Date.now());
                 }
               } catch(e){}
             });
           }
 
-          const leadsFormatados = Array.from(leadsQueResponderam.values()).sort((a,b) => new Date(b.data) - new Date(a.data));
+          if (chatStore && chatStore.chats) {
+            chatStore.chats.forEach((sessionChats) => {
+              sessionChats.forEach((chat, jid) => {
+                chat.messages.forEach((msg) => {
+                  if (!msg.fromMe) registrarResposta(jid, msg.text || '', msg.timestamp || Date.now());
+                });
+              });
+            });
+          }
+
+          const leadsFormatados = Array.from(leadsQueResponderam.values()).sort((a,b) => new Date(b.ultima_resposta_em || b.data) - new Date(a.ultima_resposta_em || a.data));
+          const totalProspectados = leadsEnviados.size;
 
           return json(200, {
             funil: {
@@ -319,7 +420,25 @@ const server = http.createServer((req, res) => {
               responderam: leadsQueResponderam.size,
               taxaConversao: totalProspectados > 0 ? ((leadsQueResponderam.size / totalProspectados) * 100).toFixed(1) : 0
             },
-            leadsQuentes: leadsFormatados
+            leadsQuentes: leadsFormatados,
+            ultimosEnvios: ultimosEnvios
+              .sort((a,b) => new Date(b.data) - new Date(a.data))
+              .slice(0, 100),
+            filas: {
+              duracaoMediaMs,
+              duracaoMedia: formatarDuracao(duracaoMediaMs),
+              totalPlanilhasMedidas: planilhasComDuracao.length,
+              planilhas: planilhas.sort((a,b) => new Date(b.inicio || 0) - new Date(a.inicio || 0))
+            },
+            mensagens: {
+              porTelefone: Array.from(mensagensPorTelefone.values())
+                .sort((a,b) => b.total - a.total)
+                .slice(0, 100),
+              porNumeroDia: Array.from(mensagensPorNumeroDia.values())
+                .sort((a,b) => b.dia.localeCompare(a.dia) || a.numero.localeCompare(b.numero)),
+              porNumeroHora: Array.from(mensagensPorNumeroHora.values())
+                .sort((a,b) => b.hora.localeCompare(a.hora) || a.numero.localeCompare(b.numero))
+            }
           });
         } catch(e) {
           return json(500, { error: e.message });
@@ -331,6 +450,8 @@ const server = http.createServer((req, res) => {
           WHATSAPP_NUMEROS: process.env.WHATSAPP_NUMEROS || '1',
           BOT_NUMEROS_ATIVOS: process.env.BOT_NUMEROS_ATIVOS || '1',
           GEMINI_API_KEY: process.env.GEMINI_API_KEY ? '********' : '',
+          OPENAI_API_KEY: process.env.OPENAI_API_KEY ? '********' : '',
+          IA_PROVIDER: process.env.IA_PROVIDER || 'gemini',
           IA_TEMPERATURE: process.env.IA_TEMPERATURE || '0.7',
         };
         const numWhatsapp = Number(process.env.WHATSAPP_NUMEROS) || 1;
@@ -367,6 +488,8 @@ const server = http.createServer((req, res) => {
             updateEnv('WHATSAPP_NUMEROS', data.WHATSAPP_NUMEROS);
             updateEnv('BOT_NUMEROS_ATIVOS', data.BOT_NUMEROS_ATIVOS);
             updateEnv('GEMINI_API_KEY', data.GEMINI_API_KEY);
+            updateEnv('OPENAI_API_KEY', data.OPENAI_API_KEY);
+            updateEnv('IA_PROVIDER', data.IA_PROVIDER);
             updateEnv('IA_TEMPERATURE', data.IA_TEMPERATURE);
 
             // Dynamically update WhatsApp names
@@ -392,9 +515,9 @@ const server = http.createServer((req, res) => {
           if (linhas.length > 0) {
             // Os logs já vêm como array de strings, que podem ser JSON. Vamos formatar se for JSON para facilitar leitura.
             const linhasFormatadas = linhas.map(l => {
-              try { 
-                const obj = JSON.parse(l); 
-                return `[${new Date(obj.timestamp).toLocaleTimeString()}] ${obj.level}: ${obj.message}`; 
+              try {
+                const obj = JSON.parse(l);
+                return `[${new Date(obj.timestamp).toLocaleTimeString()}] ${obj.level}: ${obj.message}`;
               } catch(e) { return l; }
             });
             return json(200, { logs: linhasFormatadas.join('\n') });
@@ -403,6 +526,17 @@ const server = http.createServer((req, res) => {
           }
         } catch (e) {
           return json(500, { error: 'Erro ao ler logs.' });
+        }
+      }
+
+      if (url === '/api/reiniciar-bot' && req.method === 'POST') {
+        try {
+          console.log('🔄 Bot reiniciando via API...');
+          require('dotenv').config({ path: path.join(__dirname, '..', 'config', '.env'), override: true });
+          return json(200, { success: true, message: 'Configurações recarregadas com sucesso!' });
+        } catch (e) {
+          console.error('❌ Erro ao reiniciar bot:', e);
+          return json(500, { error: 'Erro ao reiniciar bot: ' + e.message });
         }
       }
 
