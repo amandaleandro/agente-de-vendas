@@ -550,6 +550,82 @@ const server = http.createServer((req, res) => {
         return;
       }
 
+      // Warmup API
+      if (url === '/api/warmup/status' && req.method === 'GET') {
+        try {
+          if (!global.warmupManager) {
+            return json(500, { error: 'WarmupManager não inicializado' });
+          }
+          const relatorio = global.warmupManager.obterRelatorio();
+          return json(200, {
+            status: relatorio,
+            timestamp: new Date().toISOString()
+          });
+        } catch (e) {
+          return json(500, { error: e.message });
+        }
+      }
+
+      if (url.startsWith('/api/warmup/config/') && req.method === 'GET') {
+        try {
+          const sessao = parseInt(url.split('/').pop());
+          if (!global.warmupManager) {
+            return json(500, { error: 'WarmupManager não inicializado' });
+          }
+          const config = global.warmupManager.obterConfiguracao(sessao);
+          return json(200, config);
+        } catch (e) {
+          return json(500, { error: e.message });
+        }
+      }
+
+      if (url === '/api/warmup/reset' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            const sessao = parseInt(data.sessao);
+            if (!global.warmupManager) {
+              return json(500, { error: 'WarmupManager não inicializado' });
+            }
+            const resultado = global.warmupManager.resetarSessao(sessao);
+            return json(200, resultado);
+          } catch (e) {
+            return json(500, { error: e.message });
+          }
+        });
+        return;
+      }
+
+      if (url === '/api/warmup/reset-dia' && req.method === 'POST') {
+        try {
+          if (!global.warmupManager) {
+            return json(500, { error: 'WarmupManager não inicializado' });
+          }
+          global.warmupManager.resetarDia();
+          return json(200, {
+            success: true,
+            message: 'Reset diário executado',
+            relatorio: global.warmupManager.obterRelatorio()
+          });
+        } catch (e) {
+          return json(500, { error: e.message });
+        }
+      }
+
+      if (url === '/api/warmup/estatisticas' && req.method === 'GET') {
+        try {
+          if (!global.warmupManager) {
+            return json(500, { error: 'WarmupManager não inicializado' });
+          }
+          const stats = global.warmupManager.obterEstatisticas();
+          return json(200, { estatisticas: stats });
+        } catch (e) {
+          return json(500, { error: e.message });
+        }
+      }
+
       // Fallback for missing APIs
       return json(404, { error: 'Endpoint não encontrado' });
     }

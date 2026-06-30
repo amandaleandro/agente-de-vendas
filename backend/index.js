@@ -110,6 +110,7 @@ let bancoIndisponivelAte = 0;
 let baseConhecimento = '';
 let prospeccaoIniciada = false;
 const warmup = new WarmupManager();
+global.warmupManager = warmup; // Exportar para APIs
 let ultimoResetWarmup = new Date().toDateString();
 let tank = null; // Será inicializado após IA estar pronta
 let processadorTankAtivo = false;

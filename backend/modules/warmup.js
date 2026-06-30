@@ -247,6 +247,93 @@ class WarmupManager {
     });
     return relatorio;
   }
+
+  // Configurações ajustáveis
+  obterConfiguracao(sessao) {
+    const stats = this.statsEmMemoria.get(sessao) || {};
+    const quota = this.obterQuota(sessao);
+
+    return {
+      sessao,
+      nivelWarmup: this.obterNivelWarmup(sessao),
+      quotaAtual: quota,
+      quotas: {
+        nivel1: 10,
+        nivel2: 20,
+        nivel3: 50,
+        nivel4: 100,
+        nivel5: 200
+      },
+      diasParaProximoNivel: this.calcularDiasParaProximo(sessao),
+      enviados: stats.totalEnviados || 0,
+      erros: stats.erros || 0,
+      consecutivos: stats.consecutivos || 0,
+      diasAtivos: this.contagemDiasAtivos(sessao),
+      podeEnviar: this.podeEnviar(sessao)
+    };
+  }
+
+  calcularDiasParaProximo(sessao) {
+    const diasAtivos = this.contagemDiasAtivos(sessao);
+    const nivel = this.obterNivelWarmup(sessao);
+
+    if (nivel >= 5) return 0; // Já está no máximo
+
+    const proximoMilestone = {
+      1: 2,
+      2: 4,
+      3: 6,
+      4: 7
+    }[nivel] || 0;
+
+    return Math.max(0, proximoMilestone - diasAtivos);
+  }
+
+  alterarQuota(sessao, novaQuota) {
+    // Permitir sobrescrever quotas através de arquivo de config
+    if (!this.quotasCustomizadas) this.quotasCustomizadas = {};
+    this.quotasCustomizadas[sessao] = novaQuota;
+    return { success: true, novaQuota };
+  }
+
+  resetarSessao(sessao) {
+    this.statsEmMemoria.delete(sessao);
+    // Remover registros antigos dessa sessão do arquivo
+    if (!fs.existsSync(this.statsFile)) return { success: true };
+
+    try {
+      const linhas = fs.readFileSync(this.statsFile, 'utf8').split('\n').filter(l => l.trim());
+      const linhasLimpas = linhas.filter(linha => {
+        try {
+          const registro = JSON.parse(linha);
+          return registro.sessao !== sessao;
+        } catch {
+          return true;
+        }
+      });
+
+      if (linhasLimpas.length < linhas.length) {
+        fs.writeFileSync(this.statsFile, linhasLimpas.join('\n') + '\n', 'utf8');
+      }
+      return { success: true, message: `Sessão ${sessao} resetada` };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  obterEstatisticas() {
+    const stats = [];
+    this.statsEmMemoria.forEach((data, sessao) => {
+      stats.push({
+        sessao,
+        totalEnviados: data.totalEnviados,
+        erros: data.erros,
+        taxa: data.totalEnviados > 0 ? ((data.totalEnviados - data.erros) / data.totalEnviados * 100).toFixed(1) : 100,
+        diasAtivos: this.contagemDiasAtivos(sessao)
+      });
+    });
+    return stats;
+  }
 }
 
 module.exports = WarmupManager;
