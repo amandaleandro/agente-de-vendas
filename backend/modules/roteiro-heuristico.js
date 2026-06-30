@@ -34,19 +34,19 @@ class RoteiroHeuristico {
 
     if (intencao === 'desinteresse') {
       this.etapasPorContato.set(telefone, 'encerrado');
-      return 'Tudo bem, obrigado por avisar. Nao vou insistir.';
+      return 'Tranquilo, sem problema. Qualquer coisa é só me chamar 👍';
     }
 
     if (etapaAtual === 'encerrado') {
-      return 'Tudo bem. Nao vou insistir.';
+      return 'Sem problema!';
     }
 
     if (intencao === 'negatividade') {
-      return 'Desculpa se minha mensagem ficou fora do ponto. Posso entender melhor: hoje sua maior dificuldade e conseguir cliente, montar proposta ou fazer o cliente responder depois do orcamento?';
+      return 'Opa, peço desculpas. Deixa eu ser direto: qual é mesmo seu maior gargalo - é o cliente não responder depois da proposta ou outro problema?';
     }
 
     if (intencao === 'teste_bot') {
-      return 'Sou um assistente virtual aqui para entender seu processo comercial. Antes de qualquer coisa: depois que voce passa orcamento, o cliente costuma responder ou some bastante?';
+      return 'Boa! Sim, sou assistente aqui mesmo. Tô tentando entender como funciona seu negócio. Depois que você manda um orçamento, o cliente costuma sumir ou volta com dúvidas?';
     }
 
     // Verificar se já perguntou algo parecido no histórico
@@ -63,48 +63,45 @@ class RoteiroHeuristico {
       this.etapasPorContato.set(telefone, 'perguntou_produto');
 
       if (jaFezPerguntaSobreVolume) {
-        return `Posso te explicar, sim. O FechaPro ajuda a criar propostas melhores e acompanhar o cliente depois do envio. Quer que eu te mande um diagnostico rapido pra ver onde seu processo esta travando? ${this.URL_DIAGNOSTICO}`;
+        return `Claro! O FechaPro ajuda você a montar propostas melhores e acompanhar. Deixa eu te enviar um diagnóstico rápido pra você ver onde seu processo tá emperrando? ${this.URL_DIAGNOSTICO}`;
       }
 
-      return `Posso te explicar, sim. O FechaPro ajuda a organizar propostas e acompanhamento de vendas. Mas pra eu te orientar certo: voce hoje envia quantos orcamentos por semana?`;
+      return `Sim! Basicamente ajuda a organizar seus orçamentos e acompanhamento. Mas primeiro me diz - quantos orçamentos você costuma mandar por semana?`;
     }
 
     if (intencao === 'concorrente') {
       this.etapasPorContato.set(telefone, 'dor');
-      return 'Boa, entendi. E a ferramenta que voce usa hoje resolve bem o acompanhamento depois que envia a proposta, ou ainda fica muito manual?';
+      return 'Entendo. E a ferramenta que você usa hoje, ela resolve bem o acompanhamento depois que você manda a proposta ou fica muito na mão mesmo?';
     }
 
     if (intencao === 'volume_alto') {
       this.etapasPorContato.set(telefone, 'dor');
-      return 'Com esse volume, qualquer melhoria no acompanhamento muda bastante o resultado. Hoje voce controla quem abriu, respondeu ou precisa de retorno?';
+      return 'Com esse volume, até uma pequena melhoria no acompanhamento muda bastante. Você consegue acompanhar quem abriu, quem respondeu ou precisa de follow-up?';
     }
 
     if (etapaAtual === 'apresentacao') {
-      const temHistorico = historicMensagens && historicMensagens.length > 2;
-
       if (intencao === 'saudacao') {
-        return `Oi, tudo bem? Aqui e ${identidade.nome}. Queria entender uma coisa rapida: quando voce passa um orcamento, o cliente costuma responder ou some bastante?`;
+        return `Oi! Aqui é ${identidade.nome}. Então me conta uma coisa: depois que você manda um orçamento, o cliente costuma sumir ou volta com dúvidas?`;
       }
 
       if (['afirmacao_positiva', 'dor_some', 'dor_desconto'].includes(intencao)) {
         this.etapasPorContato.set(telefone, 'dor');
 
-        // Se respondeu "Sempre acontece", "Sim", "Isso mesmo" ou similar
         if (intencao === 'afirmacao_positiva') {
           if (jaFezPerguntaSobreOrcamento) {
-            return 'Entendi, isso eh bem comum mesmo. Entao o desafio principal eh que depois que voce manda a proposta, o cliente nao responde mais ou demora muito pra dar retorno?';
+            return 'Pois é, isso é bem comum mesmo. Então basicamente você manda a proposta e fica no vácuo. É sempre assim ou tem clientes que voltam?';
           }
-          return 'Que bacana que respondeu. Entao esse eh realmente o maior gargalo no seu processo de venda?';
+          return 'Então esse é mesmo o seu principal desafio?';
         }
 
-        return 'Entendi. Isso geralmente trava por dois motivos: o cliente nao percebe valor antes do preco, ou falta retorno na hora certa. Qual dos dois acontece mais com voce?';
+        return 'Isso geralmente passa por dois problemas: o cliente não vê o valor, ou falta um acompanhamento certo. Qual você sente mais?';
       }
 
       if (jaFezPerguntaSobreOrcamento) {
-        return 'Tendi. Entao, pra eu nao perguntar a mesma coisa de novo: qual eh realmente o seu maior desafio - conseguir cliente, montar proposta melhor, ou fazer o cliente responder depois?';
+        return 'Tá, então qual é o seu maior desafio mesmo - captar cliente, montar uma proposta melhor, ou fazer o cliente responder?';
       }
 
-      return 'Antes de te falar qualquer coisa, quero entender seu caso: quando voce passa um orcamento, o cliente costuma responder ou some bastante?';
+      return 'Então me diz: qual é o seu gargalo mesmo? É o cliente sumir, o preço ficar caro, ou é outra coisa?';
     }
 
     if (etapaAtual === 'dor') {
@@ -113,28 +110,28 @@ class RoteiroHeuristico {
         const jaFezPerguntaSobreApresentacao = perguntasAnteriores.includes('apresenta') || perguntasAnteriores.includes('proposta completa');
 
         if (jaFezPerguntaSobreApresentacao) {
-          return 'Entendi seu fluxo. O que acontece eh que falta acompanhamento depois que mandam a proposta. Voce ja pensou em ter um sistema pra organizar quem abriu, respondeu ou precisa de follow-up?';
+          return 'Tá claro. Você manda proposta, mas falta um acompanhamento melhor. Você controla quem abriu, leu ou precisa de um empurrão?';
         }
 
-        return 'Faz sentido. Como voce apresenta o servico hoje: manda so o valor no WhatsApp ou envia uma proposta mais completa com detalhes e beneficios?';
+        return 'Entendo. Mas me diz - você manda só o valor no WhatsApp ou manda uma proposta mais completa?';
       }
     }
 
     if (etapaAtual === 'diagnostico') {
       this.etapasPorContato.set(telefone, 'permissao_produto');
-      return 'Entendi. O problema parece menos "preco" e mais percepcao de valor e acompanhamento. Se fizer sentido, posso te mostrar um jeito mais organizado de conduzir isso.';
+      return 'Então o problema não é tanto o preço em si, mas o cliente não ver o valor e você não conseguir acompanhar direito. Tá certo?';
     }
 
     if (etapaAtual === 'permissao_produto') {
       if (['afirmacao_positiva', 'duvida_produto', 'preco', 'urgencia'].includes(intencao)) {
         this.etapasPorContato.set(telefone, 'perguntou_produto');
-        return `A ideia do FechaPro e te ajudar a montar propostas melhores e acompanhar o cliente depois do envio. Quer que eu te mande o diagnostico rapido pra ver onde seu processo esta travando? ${this.URL_DIAGNOSTICO}`;
+        return `O FechaPro basicamente te ajuda a criar propostas profissionais e acompanhar o cliente depois. Deixa eu te mandar um diagnóstico rápido? ${this.URL_DIAGNOSTICO}`;
       }
 
-      return 'Sem problema. Me diz entao: hoje o que mais te incomoda no processo de venda?';
+      return 'Tá bom. O que você sente que mais compromete suas vendas?';
     }
 
-    return 'Entendi. Pra eu nao te mandar algo generico: qual parte da venda mais trava hoje, proposta, preco ou retorno do cliente?';
+    return 'Qual parte da venda mais emperrada pra você - é a proposta, o preço, ou o cliente não voltar depois?';
   }
 }
 
