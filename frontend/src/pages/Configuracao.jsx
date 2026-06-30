@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Key, Cpu, Flame, RotateCcw } from 'lucide-react';
+import { Save, Key, Cpu, RotateCcw } from 'lucide-react';
 
 export default function Configuracao() {
   const [config, setConfig] = useState({
