@@ -953,6 +953,45 @@ function pcmParaWav(pcm, sampleRate = 24000) {
   return Buffer.concat([cabecalho, pcm]);
 }
 
+async function transcreverAudioGemini(buffer, mimetype) {
+  if (!gemini) return null;
+
+  try {
+    const base64Data = buffer.toString('base64');
+
+    const response = await gemini.models.generateContent({
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimetype || 'audio/ogg',
+                data: base64Data
+              }
+            },
+            {
+              text: 'Transcreva este áudio em português. Retorne apenas o texto transcrito, sem explicações.'
+            }
+          ]
+        }
+      ],
+      config: {
+        temperature: 0.1,
+        maxOutputTokens: 1000
+      }
+    });
+
+    const transcricao = response.text?.trim() || '';
+    console.log(`🎙️ Áudio transcrito: ${transcricao.substring(0, 100)}...`);
+    return transcricao;
+  } catch (err) {
+    console.error('Erro ao transcrever áudio:', err.message);
+    return null;
+  }
+}
+
 async function gerarAudio(resposta) {
   const resultado = await gemini.models.generateContent({
     model: process.env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts',
@@ -1165,6 +1204,7 @@ async function conectar(sessao = 1) {
   socketAtual.ev.on('creds.update', saveCreds);
 
   socketAtual.ev.on('messages.upsert', async (m) => {
+    return; // DESATIVADO: Processamento de mensagens pausado
     // 🛡️ Filtro de Números Ativos para a IA
     const ativos = process.env.BOT_NUMEROS_ATIVOS
       ? process.env.BOT_NUMEROS_ATIVOS.split(',').map(n => n.trim()).filter(Boolean)
@@ -1321,7 +1361,7 @@ async function conectar(sessao = 1) {
     }
 
     const classificacao = intentClassifier.classificarMensagem(texto);
-    logger.info('Classificacao da mensagem recebida', {
+    logger.debug('Classificacao da mensagem recebida', {
       sessao,
       sender,
       intent: classificacao.intent,
@@ -1449,7 +1489,8 @@ async function conectar(sessao = 1) {
       }
 
       let textoReal = texto;
-      
+      let transcricaoRealizada = false;
+
       // Transcrição de áudio (se for áudio e tivermos midia + gemini)
       if (infoMidia?.tipo === 'audio' && midia && gemini) {
         console.log(`🎤 Transcrevendo áudio recebido de ${sender}...`);
@@ -1457,14 +1498,19 @@ async function conectar(sessao = 1) {
           const transcricao = await transcreverAudioGemini(midia.buffer, midia.mimetype);
           if (transcricao) {
             textoReal = `[Áudio Transcrito do Cliente]: ${transcricao}`;
+            transcricaoRealizada = true;
             console.log(`📝 Áudio transcrito: "${transcricao}"`);
+            // Notificar ao usuário que entendemos seu áudio
+            await enviarPeloBot(socketAtual, sender, { text: '✅ Recebi seu áudio! Deixa eu processar...' }, sessao);
           } else {
             console.log(`⚠️ Áudio não pôde ser transcrito.`);
             textoReal = "[Áudio recebido, mas não pôde ser transcrito]";
+            await enviarPeloBot(socketAtual, sender, { text: '⚠️ Recebi seu áudio, mas não consegui transcrever. Pode tentar escrever em texto?' }, sessao);
           }
         } catch (e) {
           console.error(`❌ Erro na transcrição:`, e.message);
           textoReal = "[Erro ao transcrever áudio do cliente]";
+          await enviarPeloBot(socketAtual, sender, { text: '❌ Tive um problema ao processar seu áudio. Pode tentar de novo?' }, sessao);
         }
       }
 
@@ -1722,8 +1768,8 @@ async function iniciar() {
 
   await carregarBaseConhecimento();
 
-  crossWarmupManager.iniciar(60); // Inicia o warmup cruzado a cada 60 min
-  
+  // crossWarmupManager.iniciar(60); // Inicia o warmup cruzado a cada 60 min
+
   const followupManager = new FollowupManager(process.env.GEMINI_API_KEY, async (destinatario, texto, sessao) => {
     const socket = socketsConectados.get(sessao);
     if (!socket) throw new Error(`Socket da sessão ${sessao} não conectado`);

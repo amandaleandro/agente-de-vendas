@@ -1,125 +1,119 @@
 {
   "fila": [],
-  "planilhaAtual": {
-    "nome": "hora_02.csv",
-    "caminho": "/app/backend/listas/hora_02.csv",
-    "contatos_totais": 20,
-    "contatos": [
-      {
-        "empresa/nome": "Constru Jota",
-        "telefone/whatsapp": "5534991329322"
-      },
-      {
-        "empresa/nome": "Davi Eletricista uberaba",
-        "telefone/whatsapp": "5534988311830"
-      },
-      {
-        "empresa/nome": "EMM Construtora",
-        "telefone/whatsapp": "5534991033101"
-      },
-      {
-        "empresa/nome": "JP eletricista uberaba",
-        "telefone/whatsapp": "5534996783056"
-      },
-      {
-        "empresa/nome": "Marques Pedreiro Carpinteiro",
-        "telefone/whatsapp": "5534984247962"
-      },
-      {
-        "empresa/nome": "Mega Construção",
-        "telefone/whatsapp": "5534988120289"
-      },
-      {
-        "empresa/nome": "Pedreiro Luis Carlos Fiusa Mendes",
-        "telefone/whatsapp": "5534998784737"
-      },
-      {
-        "empresa/nome": "Pedreiro webert",
-        "telefone/whatsapp": "5534999965622"
-      },
-      {
-        "empresa/nome": "So moveis - Móveis e consertos para escritório",
-        "telefone/whatsapp": "5534998670600"
-      },
-      {
-        "empresa/nome": "Solumais Estruturas Metálicas",
-        "telefone/whatsapp": "5534988038421"
-      },
-      {
-        "empresa/nome": "Tomé Pinturas",
-        "telefone/whatsapp": "5534988116088"
-      },
-      {
-        "empresa/nome": "WM BRITTO GESSO LTDA",
-        "telefone/whatsapp": "5534996339380"
-      },
-      {
-        "empresa/nome": "CABRAL SISTEMAS CONSTRUTIVOS",
-        "telefone/whatsapp": "5534999945999"
-      },
-      {
-        "empresa/nome": "Donizetti serviço hidráulicos e elétricos",
-        "telefone/whatsapp": "5534992363276"
-      },
-      {
-        "empresa/nome": "ELETRICISTA RODOLFO",
-        "telefone/whatsapp": "5534991653797"
-      },
-      {
-        "empresa/nome": "Michel Santos - Pedreiro MM construções",
-        "telefone/whatsapp": "5516997509849"
-      },
-      {
-        "empresa/nome": "Pretti Visual Mão de Obra Especializada em ACM.",
-        "telefone/whatsapp": "5516981777178"
-      },
-      {
-        "empresa/nome": "ConstruLean - Construtora Sorocaba",
-        "telefone/whatsapp": "5515998288512"
-      },
-      {
-        "empresa/nome": "Rap10 Reformas",
-        "telefone/whatsapp": "5517988189816"
-      },
-      {
-        "empresa/nome": "ARQUITETA DÉBORA PIERI",
-        "telefone/whatsapp": "5517991883103"
-      }
-    ]
-  },
+  "planilhaAtual": null,
   "statusPlanilhas": {
-    "exemplo.csv": {
+    "hora_02.csv": {
       "status": "concluída",
-      "inicio": "2026-06-30T01:07:03.679Z",
-      "contatos_totais": 5,
-      "contatos_enviados": 4,
-      "erros": 1,
-      "fim": "2026-06-30T01:22:08.936Z"
-    },
-    "hora_01.csv": {
-      "status": "concluída",
-      "inicio": "2026-06-30T02:22:10.236Z",
+      "inicio": "2026-06-30T14:31:51.990Z",
       "contatos_totais": 20,
       "contatos_enviados": 0,
-      "erros": 20,
-      "fim": "2026-06-30T03:22:10.188Z"
+      "erros": 0,
+      "fim": "2026-06-30T14:31:51.998Z"
+    },
+    "hora_03.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T15:31:52.554Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 9,
+      "erros": 2,
+      "fim": "2026-06-30T16:22:08.423Z"
+    },
+    "hora_04.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T16:43:55.299Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 19,
+      "erros": 1,
+      "fim": "2026-06-30T16:54:20.111Z"
+    },
+    "hora_05.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T17:50:45.017Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 17,
+      "erros": 3,
+      "fim": "2026-06-30T18:01:06.155Z"
+    },
+    "hora_06.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T18:01:41.022Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 16,
+      "erros": 4,
+      "fim": "2026-06-30T18:11:57.966Z"
+    },
+    "hora_07.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T18:16:49.035Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 7,
+      "erros": 0,
+      "fim": "2026-06-30T18:20:26.667Z"
+    },
+    "hora_08.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T18:30:41.069Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 18,
+      "erros": 2,
+      "fim": "2026-06-30T18:40:57.312Z"
+    },
+    "hora_09.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T19:13:03.285Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 4,
+      "erros": 11,
+      "fim": "2026-06-30T19:27:21.211Z"
+    },
+    "hora_10.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T19:27:44.808Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 0,
+      "erros": 0,
+      "fim": "2026-06-30T19:42:37.460Z"
+    },
+    "hora_11.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T19:47:11.519Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 20,
+      "erros": 0,
+      "fim": "2026-06-30T20:00:57.903Z"
+    },
+    "hora_12.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T20:16:39.696Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 5,
+      "erros": 0,
+      "fim": "2026-06-30T20:20:05.958Z"
     },
     "lista-atual.csv": {
       "status": "concluída",
-      "inicio": "2026-06-30T04:22:10.297Z",
+      "inicio": "2026-06-30T20:29:57.927Z",
       "contatos_totais": 20,
       "contatos_enviados": 0,
-      "erros": 20,
-      "fim": "2026-06-30T05:22:10.230Z"
+      "erros": 0,
+      "fim": "2026-06-30T20:29:57.933Z"
     },
-    "hora_02.csv": {
-      "status": "executando",
-      "inicio": "2026-06-30T13:57:38.368Z",
+    "hora_13.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T20:30:30.081Z",
       "contatos_totais": 20,
       "contatos_enviados": 0,
-      "erros": 0
+      "erros": 0,
+      "fim": "2026-06-30T20:30:30.090Z"
+    },
+    "hora_14.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T20:32:32.783Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 0,
+      "erros": 0,
+      "fim": "2026-06-30T20:32:32.793Z"
     }
   },
-  "proximaExecucao": "2026-06-30T06:22:10.230Z",
-  "dataSalvamento": "2026-06-30T13:57:38.368Z"
+  "dataSalvamento": "2026-06-30T20:51:07.539Z"
 }

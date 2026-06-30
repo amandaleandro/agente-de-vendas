@@ -88,6 +88,7 @@ class APIPerspeccao {
     try {
       const status = this.agenda.obterStatus();
       const relatorio = this.agenda.obterRelatorio();
+      const progressoAtual = global.prospeccaoStatus || {};
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -98,7 +99,8 @@ class APIPerspeccao {
         total_erros: relatorio.resumo.total_erros,
         planilha_atual: status.planilha_atual,
         proxima_execucao: status.proxima_execucao,
-        planilhas: relatorio.planilhas
+        planilhas: relatorio.planilhas,
+        progresso_atual: progressoAtual
       }));
     } catch (err) {
       console.error('❌ Erro ao obter status:', err);
@@ -177,6 +179,16 @@ class APIPerspeccao {
         contatos = this.agenda.fila[0].contatos;
       }
       
+      // Filtrar contatos já prospectados para que saiam da fila visual
+      if (global.prospeccaoHistorico && contatos.length > 0) {
+        contatos = contatos.filter(contato => {
+          const rawNum = contato.numero || contato.telefone || contato['telefone/whatsapp'] || contato['whatsapp'] || contato['celular'] || contato[0] || '';
+          let numero = String(rawNum).replace(/\D/g, '');
+          if (numero.length === 10 || numero.length === 11) numero = `55${numero}`;
+          return !global.prospeccaoHistorico.historicoEmMemoria.has(numero) && !global.prospeccaoHistorico.errosEmMemoria.has(numero);
+        });
+      }
+      
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, contatos }));
     } catch (err) {
@@ -210,6 +222,35 @@ class APIPerspeccao {
       res.end(JSON.stringify({ success: true, historico }));
     } catch (err) {
       console.error('❌ Erro ao buscar histórico de prospecção:', err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+  }
+
+  /**
+   * Retorna os contatos que deram erro na prospeccao
+   */
+  handleErros(res) {
+    try {
+      let erros = [];
+      if (global.prospeccaoHistorico) {
+        erros = Array.from(global.prospeccaoHistorico.errosEmMemoria.entries()).map(([telefone, dados]) => ({
+          telefone,
+          erro_em: dados.erro_em,
+          status: dados.status,
+          erro: dados.erro,
+          nome: dados.nome,
+          empresa: dados.empresa,
+          categoria: dados.categoria
+        }));
+      }
+
+      erros.sort((a, b) => new Date(b.erro_em) - new Date(a.erro_em));
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, erros }));
+    } catch (err) {
+      console.error('Erro ao buscar erros de prospeccao:', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }
@@ -250,12 +291,33 @@ class APIPerspeccao {
 
     // Iniciar
     if (url === '/api/prospeccao/iniciar' && req.method === 'POST') {
+      process.env.PROSPECCAO_ATIVA = 'true';
+      if (this.agenda) {
+        this.agenda.proximaExecucao = null;
+        this.agenda.salvarEstado();
+      }
+      if (global.prospeccaoStatus) {
+        global.prospeccaoStatus.ativo = true;
+        global.prospeccaoStatus.mensagem = 'Iniciando prospecção agora';
+        global.prospeccaoStatus.atualizadoEm = new Date().toISOString();
+      }
+      if (global.executarProspeccaoAgendada) {
+        // Dispara de forma assíncrona para não travar a resposta da API
+        setTimeout(() => global.executarProspeccaoAgendada(), 1000);
+      }
       this.handleIniciar(res);
       return true;
     }
 
     // Pausar
     if (url === '/api/prospeccao/pausar' && req.method === 'POST') {
+      process.env.PROSPECCAO_ATIVA = 'false';
+      if (global.prospeccaoStatus) {
+        global.prospeccaoStatus.ativo = false;
+        global.prospeccaoStatus.emAndamento = false;
+        global.prospeccaoStatus.mensagem = 'Prospecção pausada';
+        global.prospeccaoStatus.atualizadoEm = new Date().toISOString();
+      }
       this.handlePausar(res);
       return true;
     }
@@ -275,6 +337,11 @@ class APIPerspeccao {
     // Histórico de contatos
     if (url === '/api/prospeccao/historico' && req.method === 'GET') {
       this.handleHistorico(res);
+      return true;
+    }
+
+    if (url === '/api/prospeccao/erros' && req.method === 'GET') {
+      this.handleErros(res);
       return true;
     }
 

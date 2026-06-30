@@ -7,7 +7,12 @@ export default function Dashboard() {
   useEffect(() => {
     fetch('/api/status')
       .then(res => res.json())
-      .then(data => setStatus(data))
+      .then(data => {
+        fetch('/api/analytics/dados')
+          .then(r => r.json())
+          .then(an => setStatus({ ...data, analytics: an }))
+          .catch(() => setStatus(data));
+      })
       .catch(console.error);
   }, []);
 
@@ -58,7 +63,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 'bold' }}>
-            --
+            {status && status.analytics ? status.analytics.funil.prospectados : '--'}
           </div>
         </div>
         

@@ -93,10 +93,19 @@ class ProspeccaoAgenda {
             const contatosFormatados = contatosRaw.slice(1).map(linha => {
               const obj = {};
               cabecalho.forEach((col, idx) => {
-                obj[col] = linha[idx] || '';
+                let key = col;
+                if (key === 'numero' || key === 'celular' || key === 'whatsapp') key = 'telefone';
+                obj[key] = linha[idx] || '';
               });
+              
+              // Se não achou telefone nem nome pelos headers, tenta pelo índice padrão (0: nome, 1: telefone)
+              if (!obj.telefone && linha.length > 1) {
+                 obj.nome = linha[0] || '';
+                 obj.telefone = linha[1] || '';
+                 obj.categoria = linha[2] || '';
+              }
               return obj;
-            }).filter(c => Object.values(c).some(v => v.trim() !== ''));
+            }).filter(c => c.telefone && c.telefone.trim() !== '');
 
             planilhas.push({
               nome: arquivo,

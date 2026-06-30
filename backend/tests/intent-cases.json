@@ -1,0 +1,47 @@
+[
+  {
+    "texto": "Desculpa e so pra prestar servico quase nao damos conta dos servicos que temos fica pra uma outra hora obrigado",
+    "action": "opt_out",
+    "intent": "desinteresse"
+  },
+  {
+    "texto": "nao tenho interesse",
+    "action": "opt_out",
+    "intent": "desinteresse"
+  },
+  {
+    "texto": "agora nao, obrigado",
+    "action": "opt_out",
+    "intent": "desinteresse"
+  },
+  {
+    "texto": "Ola! Seja bem vindo. Trabalho com:\n- Projeto Arquitetonico\n- Reforma\n- Planejamento\nMe conta qual espaco voce quer reformar?",
+    "action": "ignore",
+    "intent": "mensagem_automatica"
+  },
+  {
+    "texto": "falar com atendente",
+    "action": "human_handoff",
+    "intent": "pedido_humano"
+  },
+  {
+    "texto": "quanto custa",
+    "action": "quick_reply",
+    "intent": "gatilho_rapido"
+  },
+  {
+    "texto": "quando eu mando orcamento o cliente some",
+    "action": "ai",
+    "intent": "conversa"
+  },
+  {
+    "texto": "pode ser",
+    "action": "clarify",
+    "intent": "ambigua"
+  },
+  {
+    "texto": "nao entendi",
+    "action": "clarify",
+    "intent": "ambigua"
+  }
+]

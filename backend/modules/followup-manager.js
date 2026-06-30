@@ -76,6 +76,10 @@ class FollowupManager {
       const UM_DIA_EM_MS = 24 * UMA_HORA_EM_MS;
 
       for (const [tel, ultima] of ultimasMensagens.entries()) {
+        if (global.optOutContatos && global.optOutContatos.has(String(tel).replace(/\D/g, ''))) {
+          continue;
+        }
+
         // Se a última mensagem foi enviada pelo bot (ou seja, o cliente parou de responder)
         if (ultima.enviada_pelo_bot) {
           const tempoPassado = agora - ultima.timestamp;

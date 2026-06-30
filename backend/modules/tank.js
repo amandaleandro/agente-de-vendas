@@ -65,62 +65,45 @@ class MessageTank {
     } catch {}
   }
 
-  async gerarMensagensComIA(contato) {
-    if (!this.iaProvider) return null;
-
-    const prompt = `Crie uma sequência de 3 mensagens WhatsApp personalizadas e naturais para este contato:
-- Nome: ${contato.nome || 'não informado'}
-- Empresa: ${contato.empresa || 'não informada'}
-- Categoria: ${contato.categoria || 'não informada'}
-- Endereço: ${contato.endereco || 'não informado'}
-
-Mensagens:
-1. PRIMEIRA mensagem (saudação + apresentação breve): max 150 caracteres
-2. SEGUNDA mensagem (descobrir necessidade): max 150 caracteres
-3. TERCEIRA mensagem (valor do FechaPro + chamada à ação): max 150 caracteres
-
-Responda APENAS no formato:
-msg1: [mensagem 1]
-msg2: [mensagem 2]
-msg3: [mensagem 3]
-
-Português do Brasil, natural, sem listas, sem emojis excessivos.`;
-
-    try {
-      let resultado = '';
-
-      if (this.iaProvider.type === 'xai') {
-        const res = await this.iaProvider.messages.create({
-          model: process.env.XAI_MODEL || 'grok-beta',
-          max_tokens: 300,
-          temperature: 0.7,
-          messages: [{ role: 'user', content: prompt }],
-        });
-        resultado = res.content[0]?.text?.trim() || '';
-      } else {
-        const res = await this.iaProvider.models.generateContent({
-          model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          config: { temperature: 0.7, maxOutputTokens: 300, thinkingConfig: { thinkingBudget: 0 } },
-        });
-        resultado = res.text?.trim() || '';
-      }
-
-      // Parsear resposta
-      const mensagens = [];
-      const linhas = resultado.split('\n').filter(l => l.trim());
-      for (const linha of linhas) {
-        const match = linha.match(/^msg\d+:\s*(.+)$/);
-        if (match) {
-          mensagens.push(match[1].trim());
-        }
-      }
-
-      return mensagens.length === 3 ? mensagens : null;
-    } catch (err) {
-      console.log(`⚠️ Erro ao gerar mensagens com IA: ${err.message}`);
-      return null;
+  gerarMensagensComSpintax(contato) {
+    const nome = contato.nome ? contato.nome.split(' ')[0] : 'tudo bem';
+    
+    function spin(text) {
+      return text.replace(/\{([^{}]*)\}/g, (_, options) => {
+        const parts = options.split('|');
+        return parts[Math.floor(Math.random() * parts.length)];
+      });
     }
+
+    const saudacoes = [
+      `{Oi|Olá|Opa} {${nome}|tudo bem}! Vi que você trabalha com prestação de serviços.`,
+      `{Oi|Olá} {${nome}|tudo bem}? Encontrei seu contato e vi que atua no setor de serviços.`,
+      `{Tudo bem|Como vai} {${nome}|}? Vi seu perfil e percebi que você trabalha com serviços.`,
+      `{Oi|Fala} {${nome}|}, {tudo bem?|como estão as coisas?} Achei seu número pesquisando sobre serviços.`,
+      `{Olá|Oi} {${nome}|}! Vi que você atua na área de serviços.`
+    ];
+
+    const dores = [
+      `Você já perdeu algum cliente depois de mandar o orçamento porque a pessoa sumiu?`,
+      `Uma curiosidade: você já mandou um orçamento e o cliente simplesmente parou de responder?`,
+      `Você costuma perder vendas depois que manda o preço pro cliente?`,
+      `Quando você envia uma proposta, sente que os clientes demoram pra fechar?`,
+      `Você costuma ter clientes que pedem orçamento e depois desaparecem?`
+    ];
+
+    const solucoes = [
+      `O FechaPro ajuda a criar propostas profissionais e fechar vendas online. Posso te mostrar como funciona?`,
+      `Tem uma ferramenta chamada FechaPro que resolve exatamente isso, criando propostas que o cliente aceita na hora. Posso te enviar o link?`,
+      `A gente desenvolveu o FechaPro pra acabar com isso: você manda propostas profissionais e fecha a venda na hora. Quer dar uma olhada?`,
+      `O FechaPro ajuda prestadores a fechar 3x mais orçamentos. Posso te mostrar rapidinho?`,
+      `Nós criamos o FechaPro pra te ajudar a vender mais rápido e não perder mais esses clientes. Posso mostrar?`
+    ];
+
+    const msg1 = spin(saudacoes[Math.floor(Math.random() * saudacoes.length)]);
+    const msg2 = spin(dores[Math.floor(Math.random() * dores.length)]);
+    const msg3 = spin(solucoes[Math.floor(Math.random() * solucoes.length)]);
+
+    return [msg1, msg2, msg3];
   }
 
   carregarCSV(conteudo, gerarComIA = false) {
@@ -166,7 +149,30 @@ Português do Brasil, natural, sem listas, sem emojis excessivos.`;
         if (indexCategoria >= 0) contato.categoria = partes[indexCategoria];
         if (indexEndereco >= 0) contato.endereco = partes[indexEndereco];
 
-        contatosPendentes.push(contato);
+        const geradas = this.gerarMensagensComSpintax(contato);
+        if (geradas && geradas.length > 0) {
+          const itensFila = geradas.map(m => ({
+            id: randomUUID(),
+            conteudo: m,
+            enviado: false
+          }));
+
+          const filaAtual = this.fila.get(telefone) || [];
+          this.fila.set(telefone, [...filaAtual, ...itensFila]);
+          adicionados += geradas.length;
+
+          // Salvar resultados imediatamente
+          try {
+            const resultFile = path.join(__dirname, '..', 'listas', 'prospeccao_resultados.jsonl');
+            fs.appendFileSync(resultFile, JSON.stringify({
+              telefone,
+              nome: contato.nome,
+              empresa: contato.empresa,
+              status: 'enviado',
+              data: new Date().toISOString()
+            }) + '\n');
+          } catch(e) {}
+        }
       } else {
         // Modo tradicional: mensagens já estão no CSV
         const indexMensagens = cabecalho

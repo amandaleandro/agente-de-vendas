@@ -19,7 +19,7 @@ export default function TerminalLogs() {
 
   useEffect(() => {
     fetchLogs();
-    const interval = setInterval(fetchLogs, 3000);
+    const interval = setInterval(fetchLogs, 15000);
     return () => clearInterval(interval);
   }, []);
 

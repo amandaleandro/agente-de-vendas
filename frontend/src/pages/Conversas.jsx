@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, User, Bot, AlertCircle, Play } from 'lucide-react';
 
 export default function Conversas() {
-  const [sessaoAtiva, setSessaoAtiva] = useState(1);
+  const [sessaoAtiva, setSessaoAtiva] = useState('todos');
   const [sessoes, setSessoes] = useState([1]);
   const [contatos, setContatos] = useState([]);
   const [contatoAtivo, setContatoAtivo] = useState(null);
@@ -24,21 +24,33 @@ export default function Conversas() {
 
   // Polling de contatos
   useEffect(() => {
-    const fetchContacts = () => {
-      fetch(`/api/chat/contacts?sessao=${sessaoAtiva}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.success) {
-            setContatos(data.contacts);
-          }
-        })
-        .catch(console.error);
+    const fetchContacts = async () => {
+      try {
+        if (sessaoAtiva === 'todos') {
+          const resultados = await Promise.all(sessoes.map(async (sessao) => {
+            const res = await fetch(`/api/chat/contacts?sessao=${sessao}`);
+            const data = await res.json();
+            return data.success ? data.contacts.map(c => ({ ...c, sessao })) : [];
+          }));
+
+          setContatos(resultados.flat().sort((a, b) => b.lastTime - a.lastTime));
+          return;
+        }
+
+        const res = await fetch(`/api/chat/contacts?sessao=${sessaoAtiva}`);
+        const data = await res.json();
+        if (data.success) {
+          setContatos(data.contacts.map(c => ({ ...c, sessao: sessaoAtiva })));
+        }
+      } catch (err) {
+        console.error(err);
+      }
     };
     
     fetchContacts();
     const interval = setInterval(fetchContacts, 3000);
     return () => clearInterval(interval);
-  }, [sessaoAtiva]);
+  }, [sessaoAtiva, sessoes]);
 
   // Polling de mensagens do contato ativo
   useEffect(() => {
@@ -48,7 +60,7 @@ export default function Conversas() {
     }
     
     const fetchMessages = () => {
-      fetch(`/api/chat/messages?sessao=${sessaoAtiva}&jid=${contatoAtivo.jid}`)
+      fetch(`/api/chat/messages?sessao=${contatoAtivo.sessao || sessaoAtiva}&jid=${contatoAtivo.jid}`)
         .then(r => r.json())
         .then(data => {
           if (data.success) {
@@ -93,7 +105,7 @@ export default function Conversas() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sessao: sessaoAtiva,
+          sessao: contatoAtivo.sessao || sessaoAtiva,
           jid: contatoAtivo.jid,
           text: text
         })
@@ -110,7 +122,7 @@ export default function Conversas() {
       await fetch('/api/chat/resume', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessao: sessaoAtiva, jid: contatoAtivo.jid })
+        body: JSON.stringify({ sessao: contatoAtivo.sessao || sessaoAtiva, jid: contatoAtivo.jid })
       });
       setIsPaused(false);
     } catch(err) {
@@ -131,6 +143,13 @@ export default function Conversas() {
 
       {/* Tabs de Sessões */}
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+        <button
+          className={`btn ${sessaoAtiva === 'todos' ? 'btn-primary' : ''}`}
+          onClick={() => { setSessaoAtiva('todos'); setContatoAtivo(null); }}
+          style={sessaoAtiva !== 'todos' ? { background: 'rgba(255,255,255,0.05)' } : {}}
+        >
+          Todos os Chips
+        </button>
         {sessoes.map(s => (
           <button 
             key={s} 
@@ -148,7 +167,9 @@ export default function Conversas() {
         {/* Sidebar de Contatos */}
         <div style={{ width: '30%', borderRight: '1px solid rgba(255,255,255,0.1)', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.2)' }}>
-            <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Chats (Sessão {sessaoAtiva})</h3>
+            <h3 style={{ margin: 0, fontSize: '1.1rem' }}>
+              Chats {sessaoAtiva === 'todos' ? '(Todos os Chips)' : `(Sessão ${sessaoAtiva})`}
+            </h3>
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {contatos.length === 0 ? (
@@ -158,13 +179,13 @@ export default function Conversas() {
             ) : (
               contatos.map(c => (
                 <div 
-                  key={c.jid} 
+                  key={`${c.sessao}:${c.jid}`}
                   onClick={() => setContatoAtivo(c)}
                   style={{ 
                     padding: '1rem', 
                     borderBottom: '1px solid rgba(255,255,255,0.05)', 
                     cursor: 'pointer',
-                    background: contatoAtivo?.jid === c.jid ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
+                    background: contatoAtivo?.jid === c.jid && contatoAtivo?.sessao === c.sessao ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '1rem'
@@ -177,6 +198,9 @@ export default function Conversas() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                       <strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</strong>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{formatTime(c.lastTime)}</span>
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--primary)', marginBottom: '4px', fontWeight: 700 }}>
+                      Chip {c.sessao}
                     </div>
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {c.requiresAttention && <span style={{ color: '#ef4444', marginRight: '4px', fontWeight: 'bold' }}>🚨 Ajuda!</span>}

@@ -35,6 +35,36 @@ class RoteiroHeuristico {
         'Qual sua maior dor?'
       ]
     };
+
+    // Explicações detalhadas sobre FechaPro
+    this.explicacoesFechapro = `
+📋 *Como o FechaPro funciona*
+
+*1️⃣ Você cria propostas profissionais em 1 minuto*
+- Templates prontos com sua marca
+- Preenche dados do cliente uma vez
+- Gera PDF ou link interativo
+
+*2️⃣ O cliente recebe pelo WhatsApp/Email*
+- Vê direto no navegador ou app
+- Assinatura digital incluída
+- Você acompanha em tempo real
+
+*3️⃣ Você acompanha tudo*
+- Quem abriu a proposta
+- Quanto tempo ficou lendo
+- Se assinou ou recusou
+- Quando precisa fazer follow-up
+
+*4️⃣ Resultados*
+- Clientes fecham 3x mais rápido
+- Menos "vou pensar" e mais vendas
+- Menos tempo administrativo
+
+${this.URL_DIAGNOSTICO} ← faz um diagnóstico da sua situação atual
+
+Quer que eu explique melhor alguma parte?
+    `;
   }
 
   async inicializar() {
@@ -139,6 +169,12 @@ class RoteiroHeuristico {
 
     if (intencao === 'preco' || intencao === 'duvida_produto' || intencao === 'urgencia') {
       this.etapasPorContato.set(telefone, 'perguntou_produto');
+
+      // Se quer conhecer melhor como funciona
+      if (texto.toLowerCase().includes('como') || texto.toLowerCase().includes('explica') || texto.toLowerCase().includes('me mostra') || texto.toLowerCase().includes('detalhes')) {
+        this.registrarResposta(telefone, this.explicacoesFechapro);
+        return this.explicacoesFechapro;
+      }
 
       if (jaFezPerguntaSobreVolume) {
         return `Claro! O FechaPro ajuda você a montar propostas melhores e acompanhar. Deixa eu te enviar um diagnóstico rápido pra você ver onde seu processo tá emperrando? ${this.URL_DIAGNOSTICO}`;
