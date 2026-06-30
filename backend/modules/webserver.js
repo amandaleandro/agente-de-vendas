@@ -626,6 +626,118 @@ const server = http.createServer((req, res) => {
         }
       }
 
+      // Warm Conversation API
+      if (url === '/api/conversation/iniciar' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            const sessao1 = parseInt(data.sessao1);
+            const sessao2 = parseInt(data.sessao2);
+            const tema = data.tema || null;
+
+            if (!global.warmConversation) {
+              return json(500, { error: 'WarmConversation não inicializado' });
+            }
+
+            const resultado = global.warmConversation.iniciarConversa(sessao1, sessao2, tema);
+            return json(resultado.sucesso ? 200 : 400, resultado);
+          } catch (e) {
+            return json(500, { error: e.message });
+          }
+        });
+        return;
+      }
+
+      if (url.startsWith('/api/conversation/proxima/') && req.method === 'GET') {
+        try {
+          const conversaId = url.split('/').pop();
+          if (!global.warmConversation) {
+            return json(500, { error: 'WarmConversation não inicializado' });
+          }
+
+          // Simular digitação (delay de 500-1500ms)
+          const delay = 500 + Math.random() * 1000;
+          setTimeout(() => {
+            const resultado = global.warmConversation.proximaMensagemNaConversa(conversaId);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(resultado || { erro: 'Conversa não encontrada' }));
+          }, delay);
+        } catch (e) {
+          return json(500, { error: e.message });
+        }
+        return;
+      }
+
+      if (url.startsWith('/api/conversation/status/') && req.method === 'GET') {
+        try {
+          const conversaId = url.split('/').pop();
+          if (!global.warmConversation) {
+            return json(500, { error: 'WarmConversation não inicializado' });
+          }
+
+          const status = global.warmConversation.obterStatusConversa(conversaId);
+          return json(status ? 200 : 404, status || { erro: 'Conversa não encontrada' });
+        } catch (e) {
+          return json(500, { error: e.message });
+        }
+      }
+
+      if (url.startsWith('/api/conversation/historico/') && req.method === 'GET') {
+        try {
+          const conversaId = url.split('/').pop();
+          if (!global.warmConversation) {
+            return json(500, { error: 'WarmConversation não inicializado' });
+          }
+
+          const historico = global.warmConversation.obterHistoricoConversa(conversaId);
+          return json(historico ? 200 : 404, historico || { erro: 'Conversa não encontrada' });
+        } catch (e) {
+          return json(500, { error: e.message });
+        }
+      }
+
+      if (url === '/api/conversation/temas' && req.method === 'GET') {
+        try {
+          if (!global.warmConversation) {
+            return json(500, { error: 'WarmConversation não inicializado' });
+          }
+
+          const temas = global.warmConversation.obterTemas();
+          return json(200, { temas });
+        } catch (e) {
+          return json(500, { error: e.message });
+        }
+      }
+
+      if (url === '/api/conversation/ativas' && req.method === 'GET') {
+        try {
+          if (!global.warmConversation) {
+            return json(500, { error: 'WarmConversation não inicializado' });
+          }
+
+          const ativas = global.warmConversation.obterConversasAtivas();
+          return json(200, { conversas: ativas });
+        } catch (e) {
+          return json(500, { error: e.message });
+        }
+      }
+
+      if (url.startsWith('/api/conversation/parar/') && req.method === 'POST') {
+        try {
+          const conversaId = url.split('/').pop();
+          if (!global.warmConversation) {
+            return json(500, { error: 'WarmConversation não inicializado' });
+          }
+
+          const resultado = global.warmConversation.pararConversa(conversaId);
+          return json(resultado.sucesso ? 200 : 404, resultado);
+        } catch (e) {
+          return json(500, { error: e.message });
+        }
+      }
+
       // Fallback for missing APIs
       return json(404, { error: 'Endpoint não encontrado' });
     }
