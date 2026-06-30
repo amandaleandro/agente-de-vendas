@@ -5,23 +5,58 @@ class WarmupManager {
   constructor() {
     this.statsFile = path.join(__dirname, 'warmup_stats.jsonl');
     this.statsEmMemoria = new Map(); // sessao -> { totalEnviados, ultimoEnvio, diaDosStats, erros, consecutivos }
+    this.ultimoDiaReset = new Date().toDateString();
     this.carregarStats();
+    this.iniciarResetDiarioAutomatico();
+  }
+
+  iniciarResetDiarioAutomatico() {
+    // Verifica a cada minuto se deve fazer reset diário
+    setInterval(() => {
+      const hoje = new Date().toDateString();
+      if (this.ultimoDiaReset !== hoje) {
+        this.resetarDia();
+        this.ultimoDiaReset = hoje;
+        console.log('🔄 Reset diário de warmup executado automaticamente');
+      }
+    }, 60 * 1000); // A cada minuto
   }
 
   carregarStats() {
     if (!fs.existsSync(this.statsFile)) return;
     try {
       const linhas = fs.readFileSync(this.statsFile, 'utf8').split('\n').filter(l => l.trim());
+      const hoje = new Date().toDateString();
+      const registrosPorSessao = {};
+
+      // Carregar apenas o registro MAIS RECENTE de cada sessão (hoje)
       linhas.forEach(linha => {
-        const registro = JSON.parse(linha);
-        if (registro.data && new Date(registro.data).toDateString() === new Date().toDateString()) {
-          this.statsEmMemoria.set(registro.sessao, {
-            totalEnviados: registro.totalEnviados || 0,
-            erros: registro.erros || 0,
-            consecutivos: registro.consecutivos || 0,
-            ultimoEnvio: registro.ultimoEnvio || 0,
-          });
-        }
+        try {
+          const registro = JSON.parse(linha);
+          if (registro.data && new Date(registro.data).toDateString() === hoje) {
+            // Se já existe registro desta sessão, manter o mais recente (último processado)
+            if (!registrosPorSessao[registro.sessao]) {
+              registrosPorSessao[registro.sessao] = registro;
+            } else {
+              const existente = registrosPorSessao[registro.sessao];
+              const dataExistente = new Date(existente.data).getTime();
+              const dataNovaData = new Date(registro.data).getTime();
+              if (dataNovaData > dataExistente) {
+                registrosPorSessao[registro.sessao] = registro;
+              }
+            }
+          }
+        } catch {}
+      });
+
+      // Carregar registros consolidados
+      Object.entries(registrosPorSessao).forEach(([sessao, registro]) => {
+        this.statsEmMemoria.set(sessao, {
+          totalEnviados: registro.totalEnviados || 0,
+          erros: registro.erros || 0,
+          consecutivos: registro.consecutivos || 0,
+          ultimoEnvio: registro.ultimoEnvio || 0,
+        });
       });
     } catch (err) {
       console.log(`⚠️ Erro ao carregar warmup stats: ${err.message}`);
@@ -134,13 +169,38 @@ class WarmupManager {
 
   rotacionarStatsSeNecessario() {
     try {
+      if (!fs.existsSync(this.statsFile)) return;
+
       const stats = fs.statSync(this.statsFile);
-      if (stats.size > 50 * 1024 * 1024) {
+      if (stats.size <= 50 * 1024 * 1024) return;
+
+      // Se passou de 50MB, limpar dados antigos (mais de 30 dias) e depois rodar
+      const linhas = fs.readFileSync(this.statsFile, 'utf8').split('\n').filter(l => l.trim());
+      const hoje = new Date();
+      const limiteData = new Date(hoje.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 dias atrás
+
+      const linhasLimpas = linhas.filter(linha => {
+        try {
+          const registro = JSON.parse(linha);
+          const dataRegistro = new Date(registro.data);
+          return dataRegistro >= limiteData;
+        } catch {
+          return true; // Manter linhas inválidas por segurança
+        }
+      });
+
+      if (linhasLimpas.length < linhas.length) {
+        fs.writeFileSync(this.statsFile, linhasLimpas.join('\n') + '\n', 'utf8');
+        console.log(`📊 Stats de warmup limpos: ${linhas.length - linhasLimpas.length} registros antigos removidos`);
+      } else {
+        // Se mesmo depois de limpar ainda está grande, fazer backup
         const backup = `${this.statsFile}.${Date.now()}`;
         fs.renameSync(this.statsFile, backup);
-        console.log(`📊 Stats de warmup rotacionados`);
+        console.log(`📊 Stats de warmup rotacionados para ${backup}`);
       }
-    } catch {}
+    } catch (err) {
+      console.warn(`⚠️ Erro ao rotacionar stats: ${err.message}`);
+    }
   }
 
   obterStatusWarmup(sessao) {
@@ -156,7 +216,7 @@ class WarmupManager {
       '🔥 Nível 3 (50/dia)',
       '🚀 Nível 4 (100/dia)',
       '⚡ Aquecido (200/dia)',
-    ][nivel] || 'Desconhecido';
+    ][nivel - 1] || 'Desconhecido';
 
     return {
       sessao,
@@ -176,6 +236,7 @@ class WarmupManager {
     this.statsEmMemoria.forEach((stats, sessao) => {
       stats.totalEnviados = 0;
       stats.consecutivos = 0;
+      this.salvarStats(sessao); // Persistir o reset
     });
   }
 
