@@ -13,6 +13,7 @@ const webserver = require('./modules/webserver');
 const chatStore = require('./modules/chat-store'); // Armazena conversas no painel
 const crossWarmupManager = require('./modules/cross-warmup');
 const gatilhos = require('./modules/gatilhos');
+const intentClassifier = require('./modules/intent-classifier');
 const WarmupManager = require('./modules/warmup');
 const MessageTank = require('./modules/tank');
 const MetricsManager = require('./modules/metrics');
@@ -36,10 +37,26 @@ let sock;
 const socketsConectados = new Map();
 const qrPorSessao = new Map();
 let qrGenerated = false;
+let prospeccaoAgendadaExecutando = false;
+const prospeccaoStatus = {
+  ativo: process.env.PROSPECCAO_ATIVA === 'true',
+  emAndamento: false,
+  planilha: null,
+  total: 0,
+  enviados: 0,
+  erros: 0,
+  pulados: 0,
+  chipsConectados: 0,
+  intervaloMs: 0,
+  mensagem: 'Aguardando início da prospecção',
+  iniciadoEm: null,
+  atualizadoEm: null
+};
 
 // Exportar para global para que APIs possam acessar
 global.socketsConectados = socketsConectados;
 global.qrPorSessao = qrPorSessao;
+global.prospeccaoStatus = prospeccaoStatus;
 global.prospeccaoAgenda = null; // Será inicializado depois
 global.apiPerspeccao = null; // Será inicializado depois
 
@@ -82,8 +99,13 @@ const etapasPorContato = new Map();
 const historicosPorContato = new Map();
 const atendimentosHumanos = new Set();
 const retomadasPendentes = new Map();
+const optOutContatos = new Set();
 const enviosBotEmAndamento = new Set();
 const mensagensEnviadasPeloBot = new Map();
+global.atendimentosHumanos = atendimentosHumanos;
+global.retomadasPendentes = retomadasPendentes;
+global.historicosPorContato = historicosPorContato;
+global.optOutContatos = optOutContatos;
 let bancoIndisponivelAte = 0;
 let baseConhecimento = '';
 let prospeccaoIniciada = false;
@@ -103,8 +125,86 @@ const INTERVALO_BACKUP_MS = 6 * 60 * 60 * 1000; // 6 horas
 const INTERVALO_HEALTH_CHECK_MS = 60 * 1000; // 1 minuto
 const MAX_HISTORICO_POR_CONTATO = 2; // Reduzido para 2 (apenas última conversa)
 const MAX_MENSAGENS_ENVIADAS = 300; // Limite de mensagens em cache - reduzido
+const ARQUIVO_OPT_OUT = path.join(__dirname, 'conhecimento', 'opt_out_contatos.json');
+
+function normalizarContatoOptOut(contato) {
+  const telefone = String(contato || '').split('@')[0].replace(/\D/g, '');
+  return telefone || String(contato || '').trim();
+}
+
+function carregarOptOuts() {
+  try {
+    if (!fs.existsSync(ARQUIVO_OPT_OUT)) return;
+    const dados = JSON.parse(fs.readFileSync(ARQUIVO_OPT_OUT, 'utf8'));
+    if (Array.isArray(dados)) {
+      dados.map(normalizarContatoOptOut).filter(Boolean).forEach(tel => optOutContatos.add(tel));
+    }
+  } catch (err) {
+    logger.warn('Nao foi possivel carregar opt-outs', { erro: err.message });
+  }
+}
+
+function carregarOptOutsDoHistorico() {
+  const arquivoTreinamento = path.join(__dirname, 'conhecimento', 'mensagens_treinamento.jsonl');
+  if (!fs.existsSync(arquivoTreinamento)) return;
+
+  let adicionados = 0;
+  try {
+    const linhas = fs.readFileSync(arquivoTreinamento, 'utf8').split('\n').filter(l => l.trim());
+    for (const linha of linhas) {
+      try {
+        const registro = JSON.parse(linha);
+        if (registro.enviada_pelo_bot || !registro.contato || !gatilhos.clienteSemInteresse(registro.texto || '')) {
+          continue;
+        }
+
+        const contato = normalizarContatoOptOut(registro.contato);
+        if (contato && !optOutContatos.has(contato)) {
+          optOutContatos.add(contato);
+          adicionados++;
+        }
+      } catch (err) {}
+    }
+
+    if (adicionados > 0) {
+      salvarOptOuts();
+      logger.info('Opt-outs carregados do historico de conversas', { adicionados });
+    }
+  } catch (err) {
+    logger.warn('Nao foi possivel carregar opt-outs do historico', { erro: err.message });
+  }
+}
+
+function salvarOptOuts() {
+  try {
+    const dir = path.dirname(ARQUIVO_OPT_OUT);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(ARQUIVO_OPT_OUT, JSON.stringify(Array.from(optOutContatos), null, 2), 'utf8');
+  } catch (err) {
+    logger.warn('Nao foi possivel salvar opt-outs', { erro: err.message });
+  }
+}
+
+function contatoEmOptOut(contato) {
+  return optOutContatos.has(normalizarContatoOptOut(contato));
+}
+
+function registrarOptOut(contato) {
+  const normalizado = normalizarContatoOptOut(contato);
+  if (!normalizado) return;
+  optOutContatos.add(normalizado);
+  salvarOptOuts();
+}
+
+carregarOptOuts();
+carregarOptOutsDoHistorico();
 
 async function enviarPeloBot(socketAtual, destinatario, conteudo, sessao = 1) {
+  if (contatoEmOptOut(destinatario)) {
+    logger.warn('Envio bloqueado: contato em opt-out', { destinatario, sessao });
+    return null;
+  }
+
   const chave = `${destinatario}`;
   enviosBotEmAndamento.add(chave);
   try {
@@ -113,7 +213,22 @@ async function enviarPeloBot(socketAtual, destinatario, conteudo, sessao = 1) {
     if (id) {
       mensagensEnviadasPeloBot.set(id, Date.now());
       setTimeout(() => mensagensEnviadasPeloBot.delete(id), 60_000);
+      
+      // Mapeamento de @lid para respostas
+      if (!global.lidToPhoneMap) global.lidToPhoneMap = new Map();
+      global.lidToPhoneMap.set(id, destinatario);
     }
+    
+    // Adicionar no painel para o atendente ver o envio ativo
+    chatStore.addMessage(sessao, destinatario, destinatario.split('@')[0], { 
+      id: id || 'bot_' + Date.now(),
+      text: conteudo.text || '[Mídia Enviada]', 
+      fromMe: true, 
+      isBot: true,
+      timestamp: Date.now(),
+      read: true 
+    });
+
     warmup.registrarEnvio(sessao, true);
     return enviada;
   } catch (err) {
@@ -124,12 +239,19 @@ async function enviarPeloBot(socketAtual, destinatario, conteudo, sessao = 1) {
   }
 }
 
+const roteiroHeuristico = require('./modules/roteiro-heuristico');
+roteiroHeuristico.inicializar().catch(err => console.error('Erro ao iniciar NLP local:', err));
+
 const gemini = process.env.GEMINI_API_KEY
   ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
   : null;
 
 const xai = process.env.XAI_API_KEY
   ? new OpenAI({ apiKey: process.env.XAI_API_KEY, baseURL: 'https://api.x.ai/v1' })
+  : null;
+
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
 const iaProvider = (process.env.IA_PROVIDER || 'gemini').toLowerCase();
@@ -148,21 +270,27 @@ global.prospeccaoAgenda = prospeccaoAgendaLocal; // Exportar para APIs
 global.apiPerspeccao = new APIPerspeccao(prospeccaoAgendaLocal); // Exportar para APIs
 let diagnosticoManager = null; // Será inicializado após pool estar pronto
 
-const INSTRUCOES_GEMINI = `Você é Fezinha, assistente comercial do FechaPro. Seu objetivo é UMA COISA: fechar vendas com naturalidade.
+const INSTRUCOES_GEMINI = `Você é uma assistente comercial consultiva. Seu objetivo é conversar primeiro, diagnosticar o problema real e só falar do FechaPro quando a pessoa perguntar, demonstrar abertura clara ou aceitar ver uma solução.
+
+PRIORIDADE ABSOLUTA:
+- Se a pessoa disser que não tem interesse, não quer, não precisa, não serve, pediu para parar ou pediu para sair da lista: respeite imediatamente. Não argumente, não mande link, não faça nova pergunta. Responda no máximo: "Tudo bem, obrigado por avisar. Não vou insistir."
+- Não cite FechaPro, plano, preço, diagnóstico ou link logo de cara.
+- Primeiro ajude a pessoa a perceber se existe um problema no processo comercial dela.
+- Faça perguntas naturais sobre orçamento, proposta, retorno do cliente, perda de venda, desconto e acompanhamento.
+- Só apresente o FechaPro depois que a pessoa perguntar sobre a solução, perguntar preço/como funciona, ou disser algo como "pode mostrar", "quero entender", "me explica".
 
 MENTALIDADE COMERCIAL:
-- Cada interação é uma chance de avançar a venda ou perder o cliente.
-- Não existe “apenas informação”: toda resposta deve aproximar do fechamento.
-- Sinais de compra (dúvida sobre preço, plano, como começar) = RESPONDA E VENDA IMEDIATAMENTE.
-- Objeções NÃO encerram conversas. Você resolve e continua vendendo.
-- O cliente chegou até você = ele tem interesse. Sua missão é ativar esse interesse.
+- Venda boa começa com diagnóstico, não com apresentação de produto.
+- O cliente pode não estar interessado porque ainda não percebeu o problema. Ajude com perguntas, sem pressão.
+- Se houver recusa explícita, a conversa acabou.
+- Se houver curiosidade ou pergunta sobre solução, explique com objetividade e sem exagero.
 
 ESTRATÉGIA DE VENDAS POR ETAPA:
 
 1️⃣ ABERTURA - Se nunca conversou com você:
-   - Apresente em UMA frase quem é e o que resolve (ex: “Ajudo prestadores de serviço a organizar propostas e fechar mais vendas”)
+   - Apresente-se de forma leve, sem vender o FechaPro.
    - Faça UMA pergunta de qualificação simples que o comprometa
-   - NÃO fale sobre FechaPro. Fale sobre o PROBLEMA dele.
+   - Fale sobre o PROBLEMA dele, não sobre produto.
 
 2️⃣ QUALIFICAÇÃO - Quando está descobrindo a situação:
    - Faça 3-4 perguntas MÁXIMO que levem direto ao principal gargalo.
@@ -173,7 +301,7 @@ ESTRATÉGIA DE VENDAS POR ETAPA:
 3️⃣ APRESENTAÇÃO - Depois de entender a dor:
    - CONECTE IMEDIATAMENTE a dor dele ao benefício específico do FechaPro.
    - Exemplo: “Entendi. Você perde vendas por falta de acompanhamento. O FechaPro mostra quem abriu e quando precisa retornar.”
-   - Ofereça o diagnóstico para validar ou convide para ver como funciona.
+   - Só cite FechaPro se a pessoa perguntou sobre solução ou aceitou ver como resolver.
    - Uma oferta por mensagem. Não liste recursos.
 
 4️⃣ OBJEÇÃO - Se ele levanta dúvida:
@@ -181,7 +309,7 @@ ESTRATÉGIA DE VENDAS POR ETAPA:
    - Respeonda COM FATO: use a base de conhecimento
    - Reconecte ao benefício: “Por isso que...”
    - Avance: “Posso te mostrar?” ou “Faz sentido?”
-   - NUNCA fique em objeção. Resolva e siga.
+   - Se a objeção for desinteresse claro, encerre.
 
 5️⃣ FECHAMENTO - Se ele mostrar interesse claro:
    - NÃO PERGUNTE MAIS. Responda direto: preço, plano recomendado, link de compra.
@@ -189,7 +317,7 @@ ESTRATÉGIA DE VENDAS POR ETAPA:
    - Se escolher plano, ENVIE O LINK NO PRÓXIMO PASSO.
    - Sem mais perguntas, sem “deixa eu confirmar”. FECHE.
 
-GATILHOS DE FECHAMENTO (Reconheça e AJA):
+GATILHOS DE FECHAMENTO (Reconheça e AJA somente quando a pessoa perguntar ou demonstrar abertura):
 ✓ “Quanto custa?” → Apresente preços + link + próxima pergunta: “Qual plano faz sentido?”
 ✓ “Como funciona?” → Responda brevemente e pergunte: “Você quer começar?”
 ✓ “Me mostra” → Descreva como seria prático para ELE e oferça link.
@@ -201,9 +329,9 @@ REGRAS CRÍTICAS:
 - NUNCA invente preço, prazo, recurso, desconto ou resultado garantido.
 - Preserve contexto: não pergunte o que ele já respondeu. Use as informações anteriores.
 - Uma pergunta por mensagem. Máximo 350 caracteres em conversa comum.
-- Diagnóstico é sua arma quando falta contexto: “Vamos fazer um diagnóstico rápido para eu entender melhor? ${URL_DIAGNOSTICO}”
-- Se o cliente recusar explicitamente (“não quero”, “não serve”, “não tenho interesse”), respeite. Mas desafie 1-2x antes com uma objeção respondida.
-- Em conversa casual, seja breve e humano. Mas se houver mínimo interesse, NUNCA encerre sem oferecer um próximo passo.
+- Diagnóstico só deve ser oferecido depois que houver dor identificada ou pedido de ajuda.
+- Se o cliente recusar explicitamente (“não quero”, “não serve”, “não tenho interesse”, “pare de mandar”), respeite imediatamente. Não tente contornar, não envie link, não faça nova pergunta. Responda no máximo uma confirmação curta e encerre.
+- Em conversa casual, seja breve e humano. Se ainda não houve dor clara, continue diagnosticando com UMA pergunta.
 - Transição para diagnóstico quando: “Qual é o seu maior problema?” ele não responder com clareza OU quando precisar validar antes de vender.
 
 TONS APROVADOS:
@@ -220,7 +348,7 @@ TONS PROIBIDOS:
 ✗ “Deixa eu confirmar” antes de vender (se tiver na base, venda)
 
 REGRA DE OURO:
-Sempre que está em dúvida se deve fazer nova pergunta ou oferecer/vender: VENDA. Se errar, o cliente avisa. Nunca deixe oportunidade em aberto.`;
+Se estiver em dúvida entre vender ou entender melhor, entenda melhor. Produto só entra depois de dor, pergunta ou permissão.`;
 
 
 function normalizarTelefone(valor) {
@@ -262,54 +390,16 @@ function carregarProspectos(arquivo) {
 }
 
 async function criarMensagemProspeccao(lead, identidade = identidadeDaSessao(1)) {
-  const iaAtiva = iaProvider === 'xai' ? xai : gemini;
-
-  // ==================== FALLBACK PARA ROTEIRO ====================
-  const fallbackRoteiro = () => {
-    const categoria = (lead.categoria || 'serviços profissionais').toLowerCase();
-    const nomeEmpresa = lead.nome || 'essa empresa';
-
-    const mensagensRoteiro = [
-      `Oi! Tudo bem? Aqui é ${identidade.nome}, do FechaPro. 👋 Vi que você trabalha com ${categoria} e achei que poderíamos ajudar a tornar seus orçamentos mais profissionais e rápidos. Como você envia propostas hoje?`,
-      `Oi ${nomeEmpresa}! Aqui é ${identidade.nome} do FechaPro. 🚀 Você já recebeu feedback de cliente que desapareceu após mandar orçamento? A gente ajuda a criar propostas que FECHAM. Quer conhecer?`,
-      `Oi! Tudo bem? Sou ${identidade.nome}, do FechaPro. Trabalho com empresas como a sua pra aumentar o fechamento de vendas. Você manda muitos orçamentos por semana?`,
-      `Oi ${nomeEmpresa}! Aqui é ${identidade.nome}. 👋 Estou entrando em contato porque a maioria que trabalha com ${categoria} enfrenta o mesmo problema: cliente some após a proposta. Temos a solução! Quer conversar?`,
-      `Oi! Sou ${identidade.nome}, do FechaPro. 💼 Notei que você é ${lead.categoria || 'prestador de serviços'}. Estou ajudando empresas do seu segmento a triplicar a taxa de fechamento. Te interessa?`,
-    ];
-
-    return mensagensRoteiro[Math.floor(Math.random() * mensagensRoteiro.length)];
-  };
-
-  if (!iaAtiva) return fallbackRoteiro();
-
-  const prompt = `Crie uma primeira mensagem de prospecção para WhatsApp em nome de ${identidade.nome}, com estilo ${identidade.estilo}. Dados reais: empresa=${lead.nome}; categoria=${lead.categoria || 'não informada'}; endereço=${lead.endereco || 'não informado'}; site=${lead.site || 'não informado'}. Apresente ${identidade.nome} como pessoa do FechaPro, sem afirmar que digitou pessoalmente nem negar automação. Personalize sem inventar. Termine com uma pergunta e permita recusar mensagens. Português do Brasil, humano, sem lista, até 320 caracteres.`;
-
-  let mensagem = '';
-
-  try {
-    if (iaProvider === 'xai') {
-      const resultado = await xai.messages.create({
-        model: process.env.XAI_MODEL || 'grok-beta',
-        max_tokens: 180,
-        temperature: 0.8,
-        messages: [{ role: 'user', content: prompt }],
-      });
-      mensagem = resultado.content[0]?.text?.trim() || '';
-    } else {
-      const resultado = await gemini.models.generateContent({
-        model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: { temperature: 0.8, maxOutputTokens: 180, thinkingConfig: { thinkingBudget: 0 } },
-      });
-      mensagem = resultado.text?.trim() || '';
-    }
-
-    if (!mensagem) throw new Error('IA retornou resposta vazia');
-    return mensagem.slice(0, 500);
-  } catch (err) {
-    console.log(`⚠️  IA falhou em criarMensagemProspeccao: ${err.message}. Usando roteiro...`);
-    return fallbackRoteiro();
-  }
+  const categoriaConsultiva = (lead.categoria || 'prestacao de servicos').toLowerCase();
+  const nomeConsultivo = lead.nome ? lead.nome.split(' ')[0] : 'tudo bem';
+  const perguntasConsultivas = [
+    `voce ja perdeu cliente depois de mandar orcamento porque a pessoa sumiu?`,
+    `voce ja mandou um orcamento e o cliente simplesmente parou de responder?`,
+    `acontece de voce perder venda depois que manda o preco pro cliente?`,
+    `quando voce envia uma proposta, os clientes costumam demorar pra fechar?`
+  ];
+  const perguntaConsultiva = perguntasConsultivas[Math.floor(Math.random() * perguntasConsultivas.length)];
+  return `Oi ${nomeConsultivo}, tudo bem? Aqui e ${identidade.nome}. Vi que voce trabalha com ${categoriaConsultiva} e queria entender uma coisa rapida: ${perguntaConsultiva}`;
 }
 
 function registrarProspeccao(registro) {
@@ -318,6 +408,20 @@ function registrarProspeccao(registro) {
   } else {
     prospeccaoHistorico.registrarEnvio(registro);
   }
+}
+
+function atualizarStatusProspeccao(dados = {}) {
+  Object.assign(prospeccaoStatus, dados, {
+    ativo: process.env.PROSPECCAO_ATIVA === 'true',
+    chipsConectados: global.socketsConectados ? global.socketsConectados.size : 0,
+    atualizadoEm: new Date().toISOString()
+  });
+}
+
+function calcularIntervaloProspeccao(qtdChips = 1) {
+  const intervaloPorChip = Math.max(60000, Number(process.env.PROSPECCAO_INTERVALO_POR_CHIP_MS) || Number(process.env.PROSPECCAO_INTERVALO_MS) || 180000);
+  const intervaloMinimo = Math.max(15000, Number(process.env.PROSPECCAO_INTERVALO_MIN_MS) || 30000);
+  return Math.max(intervaloMinimo, Math.ceil(intervaloPorChip / Math.max(1, qtdChips)));
 }
 
 async function executarProspeccao() {
@@ -329,9 +433,19 @@ async function executarProspeccao() {
   if (process.env.PROSPECCAO_ATIVA !== 'true') { console.log('Prospecção em modo de prévia. Defina PROSPECCAO_ATIVA=true para enviar.\n'); return; }
 
   // Filtrar leads que já foram enviados
-  const leadsNovos = prospeccaoHistorico.filtrarLeadsNovos(leads);
+  const leadsNovos = prospeccaoHistorico.filtrarLeadsNovos(leads).filter(lead => !contatoEmOptOut(lead.telefone));
   const relatorioAnterior = prospeccaoHistorico.obterRelatorio();
   console.log(`📞 Enviando apenas para ${leadsNovos.length} contatos novos (${relatorioAnterior.total_prospectados} já foram prospectados)\n`);
+  atualizarStatusProspeccao({
+    emAndamento: true,
+    planilha: path.basename(arquivo),
+    total: leadsNovos.length,
+    enviados: 0,
+    erros: 0,
+    pulados: leads.length - leadsNovos.length,
+    mensagem: `Prospecção em andamento: ${leadsNovos.length} contatos novos`,
+    iniciadoEm: new Date().toISOString()
+  });
 
   // Verificar reset diário do warmup
   const hoje = new Date().toDateString();
@@ -345,11 +459,25 @@ async function executarProspeccao() {
     });
   }
 
-  const intervalo = Math.max(180000, Number(process.env.PROSPECCAO_INTERVALO_MS) || 180000);
   let indiceSocket = 0;
   for (const lead of leadsNovos) {
+    if (process.env.PROSPECCAO_ATIVA !== 'true') {
+      atualizarStatusProspeccao({ emAndamento: false, mensagem: 'Prospecção pausada' });
+      break;
+    }
+
+    if (!prospeccaoHistorico.reservarEnvio(lead.telefone)) {
+      console.log(`⏭️  ${lead.nome || lead.telefone}: já enviado ou em processamento. Pulando.`);
+      continue;
+    }
+
     const sockets = [...socketsConectados.entries()];
-    if (!sockets.length) throw new Error('Nenhum número de WhatsApp conectado');
+    if (!sockets.length) {
+      prospeccaoHistorico.liberarReserva(lead.telefone);
+      throw new Error('Nenhum número de WhatsApp conectado');
+    }
+    const intervalo = calcularIntervaloProspeccao(sockets.length);
+    atualizarStatusProspeccao({ intervaloMs: intervalo, mensagem: `Enviando com ${sockets.length} chip(s)` });
 
     // Encontrar um socket que tenha quota disponível
     let [sessao, socketEnvio] = sockets[indiceSocket++ % sockets.length];
@@ -363,6 +491,7 @@ async function executarProspeccao() {
 
     if (!warmup.podeEnviar(sessao)) {
       console.log(`❌ TODOS os números atingiram limite diário. Parando prospecção.`);
+      prospeccaoHistorico.liberarReserva(lead.telefone);
       break;
     }
 
@@ -376,18 +505,29 @@ async function executarProspeccao() {
       registrarProspeccao({ ...lead, status: 'enviado', mensagem, sessao, perfil: identidade.nome });
       const status = warmup.obterStatusWarmup(sessao);
       console.log(`✅ ${lead.nome} (${status.enviados}/${status.quota})`);
+      atualizarStatusProspeccao({ enviados: prospeccaoStatus.enviados + 1, mensagem: `Enviado para ${lead.nome || lead.telefone}` });
     } catch (err) {
       registrarProspeccao({ ...lead, status: 'erro', erro: err.message });
       console.log(`⚠️  ${lead.nome}: ${err.message}`);
+      atualizarStatusProspeccao({ erros: prospeccaoStatus.erros + 1, mensagem: `${lead.nome || lead.telefone}: ${err.message}` });
     }
     await new Promise(resolve => setTimeout(resolve, intervalo));
   }
+  atualizarStatusProspeccao({ emAndamento: false, mensagem: 'Prospecção finalizada' });
 }
 
 /**
  * Executa prospecção com agenda (múltiplas planilhas, uma por hora)
  */
+global.executarProspeccaoAgendada = executarProspeccaoAgendada;
 async function executarProspeccaoAgendada() {
+  if (prospeccaoAgendadaExecutando) {
+    console.log('⏭️  Prospecção agendada já está em execução. Ignorando novo disparo.');
+    return;
+  }
+  prospeccaoAgendadaExecutando = true;
+
+  try {
   // Se modo tradicional (uma planilha por env), usar função antiga
   if (process.env.PROSPECCAO_CSV && !process.env.PROSPECCAO_AGENDA_ATIVA) {
     return executarProspeccao();
@@ -422,8 +562,18 @@ async function executarProspeccaoAgendada() {
   }
 
   // Filtrar leads que já foram enviados
-  const leadsNovos = prospeccaoHistorico.filtrarLeadsNovos(leads);
+  const leadsNovos = prospeccaoHistorico.filtrarLeadsNovos(leads).filter(lead => !contatoEmOptOut(lead.telefone));
   console.log(`📞 Enviando para ${leadsNovos.length} contatos novos\n`);
+  atualizarStatusProspeccao({
+    emAndamento: true,
+    planilha: planilha.nome,
+    total: leadsNovos.length,
+    enviados: 0,
+    erros: 0,
+    pulados: leads.length - leadsNovos.length,
+    mensagem: `Prospecção em andamento: ${planilha.nome}`,
+    iniciadoEm: new Date().toISOString()
+  });
 
   // Verificar reset diário do warmup
   const hoje = new Date().toDateString();
@@ -433,18 +583,38 @@ async function executarProspeccaoAgendada() {
     console.log('🔄 Contadores diários de warmup resetados');
   }
 
-  const intervalo = Math.max(180000, Number(process.env.PROSPECCAO_INTERVALO_MS) || 180000);
+  if (!global.socketsConectados || global.socketsConectados.size === 0) {
+    console.log('⚠️  Nenhum WhatsApp conectado. Aguardando conexão para enviar...\n');
+    // Não marcamos como concluída, pois ela ainda precisa ser processada!
+    atualizarStatusProspeccao({ emAndamento: false, mensagem: 'Aguardando conexão de WhatsApp' });
+    return;
+  }
   let indiceSocket = 0;
   let enviados = 0;
   let erros = 0;
 
   for (const lead of leadsNovos) {
+    if (process.env.PROSPECCAO_ATIVA !== 'true') {
+      console.log('⏸️  Prospecção pausada pelo painel.');
+      atualizarStatusProspeccao({ emAndamento: false, mensagem: 'Prospecção pausada' });
+      break;
+    }
+
+    if (!prospeccaoHistorico.reservarEnvio(lead.telefone)) {
+      console.log(`⏭️  ${lead.nome || lead.telefone}: já enviado ou em processamento. Pulando.`);
+      continue;
+    }
+
     const sockets = [...socketsConectados.entries()];
     if (!sockets.length) {
       console.log('⚠️  Nenhum WhatsApp conectado. Pausando prospecção.');
+      prospeccaoHistorico.liberarReserva(lead.telefone);
       prospeccaoAgendaLocal.marcarConcluida(enviados, erros);
+      atualizarStatusProspeccao({ emAndamento: false, mensagem: 'Pausada: nenhum WhatsApp conectado' });
       return;
     }
+    const intervalo = calcularIntervaloProspeccao(sockets.length);
+    atualizarStatusProspeccao({ intervaloMs: intervalo, mensagem: `Enviando com ${sockets.length} chip(s)` });
 
     // Encontrar um socket que tenha quota disponível
     let [sessao, socketEnvio] = sockets[indiceSocket++ % sockets.length];
@@ -458,6 +628,7 @@ async function executarProspeccaoAgendada() {
 
     if (!warmup.podeEnviar(sessao)) {
       console.log(`❌ Todos os números atingiram limite diário. Parando.`);
+      prospeccaoHistorico.liberarReserva(lead.telefone);
       break;
     }
 
@@ -472,16 +643,22 @@ async function executarProspeccaoAgendada() {
       const status = warmup.obterStatusWarmup(sessao);
       console.log(`✅ ${lead.nome} (${status.enviados}/${status.quota})`);
       enviados++;
+      atualizarStatusProspeccao({ enviados, mensagem: `Enviado para ${lead.nome || lead.telefone}` });
     } catch (err) {
       registrarProspeccao({ ...lead, status: 'erro', erro: err.message });
       console.log(`⚠️  ${lead.nome}: ${err.message}`);
       erros++;
+      atualizarStatusProspeccao({ erros, mensagem: `${lead.nome || lead.telefone}: ${err.message}` });
     }
     await new Promise(resolve => setTimeout(resolve, intervalo));
   }
 
   // Marcar planilha como concluída
   prospeccaoAgendaLocal.marcarConcluida(enviados, erros);
+  atualizarStatusProspeccao({ emAndamento: false, mensagem: 'Prospecção finalizada' });
+  } finally {
+    prospeccaoAgendadaExecutando = false;
+  }
 }
 
 
@@ -524,196 +701,14 @@ const pool = new Pool({
 diagnosticoManager = new DiagnosticoManager(pool);
 
 // Função para gerar resposta
-function gerarRespostaRoteiro(texto, telefone, identidade = identidadeDaSessao(1)) {
-  const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const apenasSaudacao = /^(oi+|ola|bom dia|boa tarde|boa noite)[!.? ]*$/.test(t.trim());
-
-  if (etapasPorContato.get(telefone) === 'aguardando_mensagem' && /^(sim|quero|pode|claro|manda|por favor)[!.? ]*$/.test(t.trim())) {
-    etapasPorContato.delete(telefone);
-    return "Claro! Você pode enviar:\n\n‘Oi! Vi que você trabalha com prestação de serviços. Você já perdeu algum cliente depois de mandar um orçamento? O FechaPro ajuda a criar propostas profissionais e acompanhar o fechamento de forma simples. Posso te mostrar como funciona?’";
-  }
-
-  if (apenasSaudacao) {
-    return `Oi, tudo bem? Aqui é ${identidade.nome}, do FechaPro 🚀 Qual tipo de serviço você oferece?`;
-  }
-
-  // ==================== OBJEÇÕES - DESINTERESSE ====================
-  if (['nao tenho interesse', 'nao quero', 'nao me interessa', 'nao agora', 'sem tempo', 'ocupado'].some(w => t.includes(w))) {
-    return `Tranquilo, respeito sua agenda! 😊 Só deixa eu avisar: o FechaPro já ajudou centenas a fechar 3x mais vendas com menos trabalho. Quando tiver 2 minutos, vê este diagnóstico rápido: ${URL_DIAGNOSTICO}\n\nE se mudar de ideia, é só chamar!`;
-  }
-
-  // ==================== OBJEÇÕES - JÁ TEM SOLUÇÃO ====================
-  if (['ja tenho', 'ja uso', 'uso outro', 'tenho outro', 'sistema similar'].some(w => t.includes(w))) {
-    return `Ótimo que já tem algo! Mas a maioria que muda pro FechaPro fala que é bem mais simples. Quer fazer uma comparação rápida? Leva 2 min: ${URL_DIAGNOSTICO}\n\nSem compromisso, só pra você conhecer as diferenças.`;
-  }
-
-  // ==================== OBJEÇÕES - MUITO CARO ====================
-  if (['caro', 'muito caro', 'nao posso pagar', 'nao tenho grana', 'sem dinheiro', 'preco alto'].some(w => t.includes(w))) {
-    return `Entendo! A maioria começa com o plano mensal (R$ 97/mês) que já traz retorno rápido. Com 5-10 propostas profissionais, você já recupera o valor. Quer fazer um teste primeiro? ${URL_DIAGNOSTICO}`;
-  }
-
-  // ==================== OBJEÇÕES - PRECISA PENSAR ====================
-  if (['preciso pensar', 'vou pensar', 'devo pensar', 'vou analisar', 'depois eu vejo', 'agora nao posso'].some(w => t.includes(w))) {
-    return `Claro! Isso é importante mesmo. Enquanto pensa, deixa eu te enviar um diagnóstico rápido pra você analisar com calma: ${URL_DIAGNOSTICO}\n\nDaí quando decidir, a gente conversa. Combinado?`;
-  }
-
-  // ==================== OBJEÇÕES - NÃO PRECISA ====================
-  if (['nao preciso', 'nao necessito', 'ta bom assim', 'nao tenho problema'].some(w => t.includes(w))) {
-    return `Entendo! Mas deixa eu te mostrar uma coisa... você manda em média quantos orçamentos por semana que desaparecem? Ou clientes que pedem desconto? O FechaPro resolve exatamente isso: ${URL_DIAGNOSTICO}`;
-  }
-
-  // ==================== TESTES - BOT VS HUMANO ====================
-  if (['voce e bot', 'voce e automatico', 'voce e robo', 'e um robo', 'atendimento automatico'].some(w => t.includes(w))) {
-    return `Que pergunta interessante! 🤖 Sou um assistente inteligente aqui do FechaPro. O que importa é que estou aqui pra ajudar você a vender mais e ganhar tempo. Posso fazer isso?`;
-  }
-
-  // ==================== OFF-TOPIC - NEGATIVIDADE ====================
-  if (['voce e burro', 'voce e idiota', 'que resposta ruim', 'que m', 'p#@!', 'isso nao funciona'].some(w => t.includes(w))) {
-    return `Desculpa se algo não ficou claro! Às vezes é difícil entender tudo por mensagem. Posso tentar melhor? Qual sua principal dificuldade em fechar vendas hoje?`;
-  }
-
-  // ==================== OFF-TOPIC - PERGUNTAS ALEATÓRIAS ====================
-  if (['qual e a previsao', 'que horas sao', 'qual e seu nome', 'como voce', 'quem sao voces', 'de onde voces'].some(w => t.includes(w))) {
-    return `Ótima pergunta! 😄 Mas deixa eu ser honesto: o meu foco é ajudar você a vender mais com o FechaPro. E é nisso que sou bom! Qual seu maior desafio pra fechar uma venda hoje?`;
-  }
-
-  if (['fechapro', 'fecha pro'].some(w => t.includes(w))) {
-    // Respostas específicas para perguntas sobre o FechaPro
-    if (['como funciona', 'como usar', 'como comecar', 'serve para qu', 'pra qu', 'para quem'].some(w => t.includes(w))) {
-      return `Para que eu recomende a forma certa de usar o FechaPro pro seu tipo de negócio, vamos começar com um diagnóstico rápido? É só 2 min:\n\n${URL_DIAGNOSTICO}\n\nDaí eu vejo exatamente o que você pode ganhar.`;
-    }
-    if (['duvida', 'nao entendo', 'confuso', 'confusa'].some(w => t.includes(w))) {
-      return `Deixa eu simplificar. O FechaPro ajuda prestadores de serviço a: ✓ Criar orçamentos profissionais ✓ Aceitar online ✓ Receber pagamento.\n\nQuer ver na prática? ${URL_DIAGNOSTICO}`;
-    }
-    if (['valor', 'custa', 'quanto custa', 'caro'].some(w => t.includes(w))) {
-      return "Temos opções acessíveis: mensal R$ 97, anual R$ 997 ou vitalício R$ 1.397. Qual modelo faz mais sentido pro seu faturamento? Ou prefere ver primeiro no diagnóstico: " + URL_DIAGNOSTICO;
-    }
-    if (['nao sei', 'sou novo', 'primeiro'].some(w => t.includes(w))) {
-      return `Tranquilo, a gente começa do zero. Primeiro você responde algumas coisas sobre sua empresa, e eu mostro exatamente o que pode melhorar:\n\n${URL_DIAGNOSTICO}`;
-    }
-    // Resposta padrão quando menciona FechaPro mas sem contexto específico
-    return "Que legal! O FechaPro é uma solução completa pra criar propostas profissionais e fechar mais vendas. Qual sua principal dúvida sobre ele? Ou posso te mostrar um diagnóstico rápido: " + URL_DIAGNOSTICO;
-  }
-
-  // ==================== RECONHECIMENTO DE OPORTUNIDADE ====================
-  if (['vendi', 'fiz uma venda', 'fechei', 'consegui um', 'conquistei'].some(w => t.includes(w))) {
-    return `Parabéns! 🎉 Que legal! Agora imagina se você conseguisse fechar 2 ou 3 MAIS por semana? É exatamente o que o FechaPro faz. Quer ver?`;
-  }
-
-  if (['encontrar cliente', 'achar cliente', 'conseguir cliente', 'fechar a venda', 'fechar venda'].some(w => t.includes(w))) {
-    return "Entendi. Para encontrar clientes e fechar mais vendas, o primeiro passo é explicar o valor do FechaPro de forma simples. Quando você apresenta a ferramenta, o que sente mais dificuldade para explicar?";
-  }
-
-  if (['muito tecnico', 'explico tecnico', 'explicar tecnico', 'nao sei explicar', 'dificuldade para explicar'].some(w => t.includes(w))) {
-    etapasPorContato.set(telefone, 'aguardando_mensagem');
-    return "Isso tem solução 😊 Em vez de explicar funções técnicas, diga assim: ‘O FechaPro ajuda prestadores de serviço a criar propostas profissionais, acompanhar o cliente e fechar vendas com mais facilidade.’ Quer que eu prepare uma mensagem curta para você abordar seus clientes?";
-  }
-
-  if (['quero', 'pode', 'prepare', 'manda', 'sim'].some(w => t.includes(w)) && ['mensagem', 'abord', 'cliente', 'texto'].some(w => t.includes(w))) {
-    return "Claro! Você pode enviar: \n\n‘Oi! Vi que você trabalha com prestação de serviços. Você já perdeu algum cliente depois de mandar um orçamento? O FechaPro ajuda a criar propostas profissionais e acompanhar o fechamento de forma simples. Posso te mostrar como funciona?’";
-  }
-
-  if (['fotograf', 'buffet', 'eletric', 'limpez', 'estet', 'marcen', 'cermon', 'ar-cond', 'servico'].some(w => t.includes(w))) {
-    return "Ótimo! E hoje, como você manda seus orçamentos?\nWhatsApp, Word, PDF, Canva ou outro?";
-  }
-
-  if (['whatsapp', 'word', 'pdf', 'canva', 'email', 'manual'].some(w => t.includes(w))) {
-    return "Entendi. E depois que você manda o orçamento, o que mais acontece?\n1️⃣ Cliente visualiza e some\n2️⃣ Cliente pede desconto\n3️⃣ Cliente demora pra responder";
-  }
-
-  if (['some', 'desconto', 'demora', 'tempo', 'perde'].some(w => t.includes(w))) {
-    if (t.includes('some')) {
-      return "É comum demais. Com o FechaPro você manda proposta com PDF, aceite e vê quando visualiza.\nTe interessa?";
-    } else if (t.includes('desconto')) {
-      return "Isso é por falta de apresentação. Com FechaPro você mostra portfólio, depoimentos, recibo.\nTe interessa?";
-    } else {
-      return "Esse tempo é ouro perdido. Com FechaPro você cria propostas muito mais rápido.\nTe interessa?";
-    }
-  }
-
-  // ==================== INTERESSE - COMPRADORES ====================
-  if (['sim', 'interesse', 'legal', 'show', 'perfeito', 'bacana', 'gostei', 'me interesse', 'quero saber mais'].some(w => t.includes(w)) && !['nao', 'mas', 'porém'].some(w => t.includes(w))) {
-    return `Boa! 🚀 Quantos orçamentos você manda por semana?\n1️⃣ 1 a 3\n2️⃣ 4 a 10\n3️⃣ Mais de 10\n4️⃣ Depende da época`;
-  }
-
-  // ==================== VOLUME ====================
-  if (['1', '2', '3', '4', '5', '10', 'poucos', 'muitos', 'muito', 'bastante', 'varios'].some(w => t.includes(w)) && !['nao', 'nunca'].some(w => t.includes(w))) {
-    return `Entendi! Com esse volume, você consegue recuperar o investimento em 1-2 semanas. Quer começar hoje ou prefere conhecer melhor primeiro?`;
-  }
-
-  // ==================== URGÊNCIA - COMPRADOR QUENTE ====================
-  if (['hoje', 'agora', 'ja', 'rápido', 'rapido', 'pronto', 'imediato', 'urgente'].some(w => t.includes(w))) {
-    return `Perfeito! Para quem quer começar HOJE, recomendo o plano anual (R$ 997/ano - melhor custo).\n\nClica aqui e cria sua conta: ${URL_COMPRA_ANUAL}\n\nSe preferir mensal (R$ 97) ou vitalício (R$ 1.397), me avisa!`;
-  }
-
-  // ==================== INDECISÃO ====================
-  if (['nao sei', 'estou em duvida', 'nao tenho certeza', 'preciso ter certeza', 'sou indeciso'].some(w => t.includes(w))) {
-    return `Isso é super normal! Por isso existe o diagnóstico: ${URL_DIAGNOSTICO}\n\nVocê responde 5 perguntas rápidas e vê EXATAMENTE quanto você pode ganhar com o FechaPro. Aí fica fácil decidir.`;
-  }
-
-  // ==================== COMEÇANDO NEGÓCIO ====================
-  if (['sou novo', 'comeco', 'começando', 'primeiro negocio', 'primeira venda', 'estou comecando'].some(w => t.includes(w))) {
-    return `Que legal começar do jeito certo! 👏 O FechaPro é perfeito pra quem tá começando porque você já PARECE grande.\n\nVamos começar com um diagnóstico: ${URL_DIAGNOSTICO}\n\nAí eu te mostro o passo-a-passo.`;
-  }
-
-  if (['preço', 'valor', 'cust', 'caro'].some(w => t.includes(w))) {
-    return "Temos o mensal por R$ 97/mês, o anual por R$ 997/ano e o vitalício por R$ 1.397 uma única vez. O anual costuma ter o melhor equilíbrio. Qual combina mais com você?";
-  }
-
-  if (['dúvida', 'como funciona', 'serve'].some(w => t.includes(w))) {
-    return "Claro! O FechaPro:\n✓ Cria propostas profissionais\n✓ Cliente aceita online\n✓ Recebe via Pix\n\nTe manda o link?";
-  }
-
-  if (['tudo', 'todas', 'comeco', 'começando', 'nao entendo', 'não entendo', 'nada'].some(w => t.includes(w))) {
-    return "Fica tranquila, no começo é normal parecer muita coisa ao mesmo tempo. Vamos por uma etapa: qual serviço sua empresa oferece?";
-  }
-
-  if (t.includes('indicacao')) {
-    return "Indicação é um ótimo começo, mas não precisa ser seu único canal. O próximo passo pode ser abordar empresas do seu público com uma mensagem curta e personalizada. Você já sabe qual tipo de cliente quer procurar primeiro?";
-  }
-
-  if (t.includes('alucin') || t.includes('repet') || t.includes('ja respondi')) {
-    return "Você tem razão, eu repeti uma pergunta que já estava respondida. Vamos retomar: hoje seus clientes chegam por indicação; posso te ajudar a criar uma segunda forma de conseguir clientes. Qual público você quer alcançar?";
-  }
-
-  // ==================== REPETIÇÕES E AJUSTES ====================
-  if (['alucin', 'repet', 'ja respondi', 'ja perguntou', 'mesma pergunta'].some(w => t.includes(w))) {
-    return `Você tem toda razão e peço desculpas! 😅 Vamos retomar do ponto que a gente estava. Qual era a sua dúvida ou o próximo passo que você queria?`;
-  }
-
-  // ==================== MENÇÃO A CLIENTES/VENDAS ====================
-  if (['cliente', 'venda', 'faturamento', 'receita', 'lucro', 'ganho'].some(w => t.includes(w))) {
-    if (['ja tenho', 'muitos'].some(w => t.includes(w))) {
-      return `Legal demais! Então você já está vendendo bem. A questão é: quer MULTIPLICAR isso? O FechaPro ajuda você a triplicar as vendas sem triplicar o trabalho.`;
-    }
-    return `Entendi. Vamos simplificar: qual sua maior dificuldade AGORA pra conseguir mais clientes ou fechar mais vendas?`;
-  }
-
-  // ==================== PADRÕES CONFUSOS ====================
-  if (['tudo', 'todas', 'comeco', 'começando', 'nao entendo', 'não entendo', 'nada', 'sem ideia'].some(w => t.includes(w))) {
-    return `Fica tranquila! 😊 No começo parece muita coisa, mas é simples. Deixa o diagnóstico fazer a magia: ${URL_DIAGNOSTICO}\n\nEm 2 minutos fica tudo claro.`;
-  }
-
-  // ==================== INDICAÇÕES ====================
-  if (t.includes('indicacao') || t.includes('indicação')) {
-    return `Indicação é ouro! Mas você sabe o que é ainda melhor? Indicação + prospecção ativa. O FechaPro te ajuda com os dois. Quer aprender?`;
-  }
-
-  // ==================== PROPOSTAS/ORÇAMENTOS ====================
-  if (['proposta', 'orcamento', 'orçamento', 'como faz'].some(w => t.includes(w))) {
-    return `Ótimo! Você tá no ponto certo. O FechaPro serve EXATAMENTE pra isso: proposta profissional que o cliente aceita online.\n\nQuer ver como funciona? ${URL_DIAGNOSTICO}`;
-  }
-
-  // ==================== FOLLOW-UP ====================
-  if (etapasPorContato.get(telefone) === 'ja_qualificado') {
-    return `Oi de novo! 👋 Que legal você voltou! Já pensou sobre aquele diagnóstico? ${URL_DIAGNOSTICO}\n\nOu tem alguma dúvida que posso responder?`;
-  }
-
-  // ==================== FALLBACK ROBUSTO - ÚLTIMA TENTATIVA ====================
-  return `Ótimo! Você mencionou algo importante. Deixa eu ser direto: o FechaPro ajuda prestadores de serviço a:\n✓ Fechar 3x mais vendas\n✓ Em 1/3 do tempo\n✓ Sem complicações técnicas\n\nQuer conhecer? ${URL_DIAGNOSTICO}\n\nOu qual sua PRINCIPAL dúvida agora?`;
+async function gerarRespostaRoteiro(texto, telefone, identidade = identidadeDaSessao(1), historicMensagens = []) {
+  return roteiroHeuristico.gerarResposta(texto, telefone, identidade, historicMensagens);
 }
 
 function limparResposta(resposta, midia = null) {
+  if (resposta == null) resposta = '';
+  if (typeof resposta !== 'string') resposta = String(resposta);
+
   const ehDiagnostico = midia && ['documento', 'imagem', 'video'].includes(midia.tipo);
   const limiteMaximo = ehDiagnostico ? 1600 : 700;
 
@@ -745,8 +740,20 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
     iaUsando = 'gemini';
   }
 
-  const iaAtiva = iaUsando === 'xai' ? xai : gemini;
-  if (!iaAtiva) return gerarRespostaRoteiro(texto, telefone, identidade);
+  let iaAtiva = null;
+  if (iaUsando === 'xai') iaAtiva = xai;
+  else if (iaUsando === 'openai') iaAtiva = openai;
+  else iaAtiva = gemini;
+
+  if (!iaAtiva) {
+    const chaveHistoricoFallback = `${identidade.sessao}:${telefone}`;
+    const historicoParaRoteiro = (historicosPorContato.get(chaveHistoricoFallback) || []).map(msg => ({
+      fromMe: msg.role === 'model',
+      text: msg.parts?.[0]?.text || '',
+      timestamp: Date.now()
+    }));
+    return gerarRespostaRoteiro(texto, telefone, identidade, historicoParaRoteiro);
+  }
 
   const chaveHistorico = `${identidade.sessao}:${telefone}`;
   let historico = historicosPorContato.get(chaveHistorico) || [];
@@ -754,7 +761,7 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
   historico._ultimoAcesso = Date.now();
 
   // Construir system instruction com contexto de diagnóstico se disponível
-  let systemInstruction = `${INSTRUCOES_GEMINI}\n\nLINK OFICIAL DO DIAGNÓSTICO: Ao oferecer ou enviar o diagnóstico, use sempre ${URL_DIAGNOSTICO}.\n\nIDENTIDADE DESTE PERFIL: Você atende em nome de ${identidade.nome}, integrante do FechaPro. Fale em primeira pessoa com estilo ${identidade.estilo}. Não use o nome Fezinha. Não afirme que a mensagem foi digitada pessoalmente e não negue automação se perguntarem.\n\nBASE OFICIAL DO FECHAPRO:\n${baseConhecimento || 'Nenhuma base oficial carregada.'}`;
+  let systemInstruction = `${INSTRUCOES_GEMINI}\n\nLINK OFICIAL DO DIAGNÓSTICO: Ao oferecer ou enviar o diagnóstico, use sempre ${URL_DIAGNOSTICO}.\n\nIDENTIDADE DESTE PERFIL: Você atende em nome de ${identidade.nome}, integrante do FechaPro, mas NÃO cite o FechaPro antes da pessoa perguntar, demonstrar abertura ou aceitar ver uma solução. Fale em primeira pessoa com estilo ${identidade.estilo}. Não use o nome Fezinha. Não afirme que a mensagem foi digitada pessoalmente e não negue automação se perguntarem.\n\nBASE OFICIAL DO FECHAPRO:\n${baseConhecimento || 'Nenhuma base oficial carregada.'}`;
 
   // Se há diagnóstico, adicionar ao contexto
   if (diagnosticoContexto) {
@@ -765,7 +772,7 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
   try {
     let resposta = '';
 
-    if (iaProvider === 'xai') {
+    if (iaUsando === 'xai') {
       const mensagensXai = historico.map(msg => ({
         role: msg.role === 'model' ? 'assistant' : msg.role,
         content: msg.parts?.[0]?.text || '',
@@ -785,6 +792,35 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
 
       resposta = resultado.content[0]?.text?.trim() || '';
       if (!resposta) throw new Error('xAI retornou uma resposta vazia');
+
+      historicosPorContato.set(chaveHistorico, [
+        ...historico,
+        { role: 'user', parts: [{ text: texto }] },
+        { role: 'model', parts: [{ text: resposta }] },
+      ].slice(-MAX_HISTORICO_POR_CONTATO));
+    } else if (iaUsando === 'openai') {
+      const mensagensOpenAI = historico.map(msg => ({
+        role: msg.role === 'model' ? 'assistant' : msg.role,
+        content: msg.parts?.[0]?.text || '',
+      })).filter(m => m.content);
+      
+      mensagensOpenAI.push({
+        role: 'user',
+        content: texto || 'Analise o conteúdo enviado e responda de forma útil.',
+      });
+
+      const resultado = await openai.chat.completions.create({
+        model: process.env.OPENAI_MODEL || 'gpt-4o',
+        max_tokens: 500,
+        temperature: 0.3,
+        messages: [
+          { role: 'system', content: systemInstruction },
+          ...mensagensOpenAI
+        ],
+      });
+
+      resposta = resultado.choices[0]?.message?.content?.trim() || '';
+      if (!resposta) throw new Error('OpenAI retornou uma resposta vazia');
 
       historicosPorContato.set(chaveHistorico, [
         ...historico,
@@ -870,7 +906,15 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
 
     const chaveHistorico = `${identidade.sessao}:${telefone}`;
     const historico = historicosPorContato.get(chaveHistorico) || [];
-    const respostaFallback = gerarRespostaRoteiro(texto, telefone, identidade);
+
+    // Converter histórico da IA para formato compatível com roteiro
+    const historicoMensagensParaRoteiro = historico.map(msg => ({
+      fromMe: msg.role === 'model',
+      text: msg.parts?.[0]?.text || '',
+      timestamp: Date.now()
+    }));
+
+    const respostaFallback = await gerarRespostaRoteiro(texto, telefone, identidade, historicoMensagensParaRoteiro);
     const { resposta: respostaFallbackLimpa, truncado: truncadoFallback } = limparResposta(respostaFallback, midia);
     metrics.registrarRespostaIA({ telefone, tamanho: respostaFallbackLimpa.length, fonte: 'roteiro', truncado: truncadoFallback });
     historicosPorContato.set(chaveHistorico, [
@@ -968,6 +1012,7 @@ async function processadorTank() {
 
     // Processar mensagens pendentes
     for (const { telefone, total, pendentes } of status.contatos) {
+      if (contatoEmOptOut(telefone)) continue;
       if (pendentes === 0 || !tank.podeEnviarParaContato(telefone)) continue;
 
       // Escolher um socket que tenha quota
@@ -1121,8 +1166,14 @@ async function conectar(sessao = 1) {
 
   socketAtual.ev.on('messages.upsert', async (m) => {
     // 🛡️ Filtro de Números Ativos para a IA
-    const ativos = process.env.BOT_NUMEROS_ATIVOS ? process.env.BOT_NUMEROS_ATIVOS.split(',') : [sessao.toString()];
+    const ativos = process.env.BOT_NUMEROS_ATIVOS
+      ? process.env.BOT_NUMEROS_ATIVOS.split(',').map(n => n.trim()).filter(Boolean)
+      : [sessao.toString()];
     if (!ativos.includes(sessao.toString())) {
+      logger.warn('Mensagem ignorada: sessao fora de BOT_NUMEROS_ATIVOS', {
+        sessao,
+        BOT_NUMEROS_ATIVOS: process.env.BOT_NUMEROS_ATIVOS || sessao.toString()
+      });
       return; // A IA ignora silenciosamente se o número atual não estiver habilitado
     }
 
@@ -1130,7 +1181,13 @@ async function conectar(sessao = 1) {
 
     if (!message.message) return;
 
-    const sender = message.key.remoteJid;
+    let sender = message.key.remoteJid;
+    
+    // DEBUG LID
+    if (sender && sender.includes('@lid')) {
+      const fs = require('fs');
+      fs.writeFileSync('./logs/lid_debug.json', JSON.stringify(m, null, 2), {flag: 'a'});
+    }
     const infoMidia = extrairMidia(message);
     const texto = message.message.conversation ||
                   message.message.extendedTextMessage?.text ||
@@ -1140,6 +1197,65 @@ async function conectar(sessao = 1) {
     // 🛡️ Ignorar mensagens de protocolo/sistema vazias
     if (!texto && !infoMidia && !message.message.pollCreationMessage) {
       return;
+    }
+
+    // 🔗 RESOLUÇÃO DE LID (WhatsApp Business)
+    if (sender && sender.includes('@lid')) {
+      const stanzaId = message.message?.extendedTextMessage?.contextInfo?.stanzaId;
+      
+      // Tentativa 1: Via stanzaId (citação direta da prospecção)
+      if (stanzaId && global.lidToPhoneMap && global.lidToPhoneMap.has(stanzaId)) {
+        const realPhone = global.lidToPhoneMap.get(stanzaId);
+        console.log(`🔗 LID ${sender} resolvido para ${realPhone} através do stanzaId.`);
+        global.lidToPhoneMap.set(sender, realPhone);
+        sender = realPhone;
+      } 
+      // Tentativa 2: Cache de sessões anteriores
+      else if (global.lidToPhoneMap && global.lidToPhoneMap.has(sender)) {
+        sender = global.lidToPhoneMap.get(sender);
+      } 
+      // Tentativa 3: Buscar no mapeamento interno do Baileys
+      else if (socketAtual?.authState?.creds) {
+        // O Baileys costuma gravar na credencial um cache de contatos LID -> PN
+        // mas pode estar em diversos lugares dependendo da versão
+        try {
+          const creds = socketAtual.authState.creds;
+          if (creds.lidMappings && Array.isArray(creds.lidMappings)) {
+            const mapped = creds.lidMappings.find(m => m.lid === sender || m.lid === sender.replace('@lid', ''));
+            if (mapped && mapped.pn) {
+               console.log(`🔗 LID ${sender} resolvido para ${mapped.pn} através do creds.lidMappings do Baileys.`);
+               const realPhone = mapped.pn.includes('@') ? mapped.pn : `${mapped.pn}@s.whatsapp.net`;
+               if (global.lidToPhoneMap) global.lidToPhoneMap.set(sender, realPhone);
+               sender = realPhone;
+            }
+          }
+        } catch(e) { /* ignore */ }
+      }
+      
+      if (sender.includes('@lid')) {
+        console.log(`⚠️ Mensagem de LID recebida sem cotação e sem cache. Impossível mapear número: ${sender}`);
+        // ÚLTIMO RECURSO: Tentar associar pelo nome (pushName) se houver prospecções recentes com esse nome
+        if (name) {
+          const fs = require('fs');
+          if (fs.existsSync('./listas/prospeccao_resultados.jsonl')) {
+             const historicoLines = fs.readFileSync('./listas/prospeccao_resultados.jsonl', 'utf8').split('\n');
+             for (let line of historicoLines.reverse()) {
+               if (!line.trim()) continue;
+               try {
+                 const data = JSON.parse(line);
+                 // Verifica se o pushName atual é parecido com o nome prospectado (ou vice versa)
+                 if (data.nome && (data.nome.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(data.nome.toLowerCase()))) {
+                    console.log(`🔗 LID ${sender} resolvido heuristicamente para ${data.telefone} devido a similaridade de nome ("${name}" ≈ "${data.nome}").`);
+                    const realPhone = `${data.telefone}@s.whatsapp.net`;
+                    if (global.lidToPhoneMap) global.lidToPhoneMap.set(sender, realPhone);
+                    sender = realPhone;
+                    break;
+                 }
+               } catch(e){}
+             }
+          }
+        }
+      }
     }
 
     // 🛡️ Prevenção de loop da IA entre chips da própria rede
@@ -1199,8 +1315,50 @@ async function conectar(sessao = 1) {
 
     if (!texto.trim()) return;
 
+    if (contatoEmOptOut(sender)) {
+      console.log(`🚫 ${sender}: mensagem ignorada porque o contato esta em opt-out.`);
+      return;
+    }
+
+    const classificacao = intentClassifier.classificarMensagem(texto);
+    logger.info('Classificacao da mensagem recebida', {
+      sessao,
+      sender,
+      intent: classificacao.intent,
+      action: classificacao.action,
+      confidence: classificacao.confidence
+    });
+
+    if (classificacao.action === 'opt_out') {
+      registrarOptOut(sender);
+      atendimentosHumanos.add(chaveAtendimento);
+      historicosPorContato.delete(chaveAtendimento);
+      const pendente = retomadasPendentes.get(chaveAtendimento);
+      if (pendente) clearTimeout(pendente.timer);
+      retomadasPendentes.delete(chaveAtendimento);
+      chatStore.setRequiresAttention(sessao, sender, false);
+
+      const respostaOptOut = classificacao.resposta || 'Entendi, obrigado por avisar. Sem problema, nao vou insistir por aqui.';
+      await socketAtual.sendMessage(sender, { text: respostaOptOut });
+      chatStore.addMessage(sessao, sender, null, {
+        id: 'optout_' + Date.now(),
+        text: respostaOptOut,
+        fromMe: true,
+        timestamp: Date.now(),
+        read: true,
+        isBot: true
+      });
+      console.log(`🚫 ${sender}: opt-out registrado apos desinteresse.`);
+      return;
+    }
+
+    if (classificacao.action === 'ignore') {
+      console.log(`🔇 ${sender}: mensagem ignorada (${classificacao.intent || classificacao.reason}).`);
+      return;
+    }
+
     // 🛡️ Verificar pedido de Humano
-    if (gatilhos.clientePedeHumano(texto)) {
+    if (classificacao.action === 'human_handoff') {
       console.log(`🚨 Cliente ${sender} solicitou atendimento humano.`);
       atendimentosHumanos.add(chaveAtendimento);
       historicosPorContato.delete(chaveAtendimento);
@@ -1209,8 +1367,24 @@ async function conectar(sessao = 1) {
       return;
     }
 
+    if (classificacao.action === 'clarify') {
+      const respostaEsclarecimento = classificacao.resposta;
+      console.log(`❔ Esclarecimento acionado para ${sender}`);
+      await socketAtual.sendMessage(sender, { text: respostaEsclarecimento });
+
+      chatStore.addMessage(sessao, sender, null, {
+        id: 'clarify_' + Date.now(),
+        text: respostaEsclarecimento,
+        fromMe: true,
+        timestamp: Date.now(),
+        read: true,
+        isBot: true
+      });
+      return;
+    }
+
     // ⚡ Verificar Gatilhos Rápidos
-    const respostaRapida = gatilhos.verificarGatilhoRapido(texto);
+    const respostaRapida = classificacao.action === 'quick_reply' ? classificacao.resposta : null;
     if (respostaRapida) {
       console.log(`⚡ Gatilho rápido acionado para ${sender}`);
       await socketAtual.sendMessage(sender, { text: respostaRapida });
@@ -1238,6 +1412,7 @@ async function conectar(sessao = 1) {
         if (!pendenteAtual || pendenteAtual.timer !== timer) return;
         retomadasPendentes.delete(chaveAtendimento);
         atendimentosHumanos.delete(chaveAtendimento);
+        chatStore.setRequiresAttention(sessao, sender, false);
         console.log(`🤖 Humano não respondeu ${sender} em 10 minutos. IA retomando o atendimento.`);
         try {
           const identidade = identidadeDaSessao(sessao);
