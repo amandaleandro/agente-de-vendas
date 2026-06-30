@@ -82,11 +82,11 @@ class HealthCheck {
       };
 
       if (percentual > 95) {
-        logger.warn('Uso de memória crítico', { percentual });
+        logger.debug('Uso de memória crítico', { percentual });
         return 'critical';
       }
       if (percentual > 85) {
-        logger.warn('Uso de memória alto', { percentual });
+        logger.debug('Uso de memória alto', { percentual });
         return 'warning';
       }
 

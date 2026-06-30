@@ -10,7 +10,7 @@ const busboy = require('busboy');
 class APIPerspeccao {
   constructor(prospeccaoAgenda) {
     this.agenda = prospeccaoAgenda;
-    this.diretorioPlanilhas = path.join(path.dirname(prospeccaoAgenda.caminhoBase), 'listas');
+    this.diretorioPlanilhas = path.join(prospeccaoAgenda.caminhoBase, 'listas');
   }
 
   /**
@@ -25,6 +25,8 @@ class APIPerspeccao {
 
       const uploadedFiles = [];
       const bb = busboy({ headers: req.headers, limits: { fileSize: 5 * 1024 * 1024 } });
+
+      req.pipe(bb);
 
       await new Promise((resolve, reject) => {
         bb.on('file', (fieldname, file, info) => {
@@ -51,8 +53,6 @@ class APIPerspeccao {
         bb.on('close', resolve);
         bb.on('error', reject);
       });
-
-      req.pipe(bb);
 
       // Aguardar upload completar
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -166,6 +166,56 @@ class APIPerspeccao {
   }
 
   /**
+   * Retorna os contatos da planilha atual
+   */
+  handleLista(res) {
+    try {
+      let contatos = [];
+      if (this.agenda.planilhaAtual && this.agenda.planilhaAtual.contatos) {
+        contatos = this.agenda.planilhaAtual.contatos;
+      } else if (this.agenda.fila.length > 0 && this.agenda.fila[0].contatos) {
+        contatos = this.agenda.fila[0].contatos;
+      }
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, contatos }));
+    } catch (err) {
+      console.error('❌ Erro ao buscar lista de contatos:', err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+  }
+
+  /**
+   * Retorna o histórico de contatos já prospectados
+   */
+  handleHistorico(res) {
+    try {
+      let historico = [];
+      if (global.prospeccaoHistorico) {
+        historico = Array.from(global.prospeccaoHistorico.historicoEmMemoria.entries()).map(([telefone, dados]) => ({
+          telefone,
+          enviado_em: dados.enviado_em,
+          status: dados.status,
+          sessao: dados.sessao,
+          nome: dados.nome,
+          empresa: dados.empresa
+        }));
+      }
+      
+      // Ordenar do mais recente para o mais antigo
+      historico.sort((a, b) => new Date(b.enviado_em) - new Date(a.enviado_em));
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, historico }));
+    } catch (err) {
+      console.error('❌ Erro ao buscar histórico de prospecção:', err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+  }
+
+  /**
    * Processa requisição de API de prospecção
    */
   async processar(req, res, url) {
@@ -216,7 +266,54 @@ class APIPerspeccao {
       return true;
     }
 
+    // Lista de contatos
+    if (url === '/api/prospeccao/lista' && req.method === 'GET') {
+      this.handleLista(res);
+      return true;
+    }
+
+    // Histórico de contatos
+    if (url === '/api/prospeccao/historico' && req.method === 'GET') {
+      this.handleHistorico(res);
+      return true;
+    }
+
+    // Exportar Histórico para CSV
+    if (url === '/api/prospeccao/exportar-historico' && req.method === 'GET') {
+      this.handleExportarHistorico(res);
+      return true;
+    }
+
     return false;
+  }
+
+  handleExportarHistorico(res) {
+    if (!this.agenda || !this.agenda.historico) {
+      res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify({ success: false, error: 'Histórico indisponível' }));
+    }
+
+    try {
+      const historicoArray = Array.from(this.agenda.historico.historicoEmMemoria.values());
+      let csvContent = 'Telefone,Data de Envio,Status,Sessao,Nome,Empresa\n';
+      
+      historicoArray.forEach(item => {
+        const nome = item.nome ? `"${item.nome.replace(/"/g, '""')}"` : '';
+        const empresa = item.empresa ? `"${item.empresa.replace(/"/g, '""')}"` : '';
+        csvContent += `${item.telefone},${item.enviado_em},${item.status},${item.sessao || 1},${nome},${empresa}\n`;
+      });
+
+      res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="historico_prospeccao.csv"',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(csvContent);
+    } catch (err) {
+      console.error('Erro ao exportar histórico:', err);
+      res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
   }
 }
 

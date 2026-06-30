@@ -197,7 +197,9 @@ Português do Brasil, natural, sem listas, sem emojis excessivos.`;
     if (!proxima) return null;
 
     try {
-      await enviarPeloBot(socketAtual, `${telefone}@s.whatsapp.net`, { text: proxima.conteudo }, sessao);
+      const consulta = await socketAtual.onWhatsApp(telefone);
+      const jidCorreto = consulta?.[0]?.exists ? consulta[0].jid : `${telefone}@s.whatsapp.net`;
+      await enviarPeloBot(socketAtual, jidCorreto, { text: proxima.conteudo }, sessao);
 
       proxima.enviado = true;
       proxima.enviado_em = new Date().toISOString();

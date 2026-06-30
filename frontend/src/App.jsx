@@ -1,11 +1,14 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Smartphone, Users, Settings } from 'lucide-react';
+import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare } from 'lucide-react';
 
 import Dashboard from './pages/Dashboard';
 import Conexao from './pages/Conexao';
 import Prospeccao from './pages/Prospeccao';
 import Configuracao from './pages/Configuracao';
+import Analytics from './pages/Analytics';
+import TerminalLogs from './pages/TerminalLogs';
+import Conversas from './pages/Conversas';
 
 function App() {
   return (
@@ -20,14 +23,23 @@ function App() {
             <NavLink to="/dashboard" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <LayoutDashboard size={20} /> Dashboard
             </NavLink>
+            <NavLink to="/analytics" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <BarChart2 size={20} /> Analytics
+            </NavLink>
             <NavLink to="/conexao" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Smartphone size={20} /> Conexão WhatsApp
             </NavLink>
             <NavLink to="/prospeccao" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Users size={20} /> Prospecção & IA
             </NavLink>
+            <NavLink to="/conversas" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <MessageSquare size={20} /> Conversas
+            </NavLink>
             <NavLink to="/configuracao" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Settings size={20} /> Configurações
+            </NavLink>
+            <NavLink to="/logs" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Terminal size={20} /> Terminal de Logs
             </NavLink>
           </div>
         </nav>
@@ -36,9 +48,12 @@ function App() {
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/analytics" element={<Analytics />} />
             <Route path="/conexao" element={<Conexao />} />
             <Route path="/prospeccao" element={<Prospeccao />} />
+            <Route path="/conversas" element={<Conversas />} />
             <Route path="/configuracao" element={<Configuracao />} />
+            <Route path="/logs" element={<TerminalLogs />} />
           </Routes>
         </main>
       </div>

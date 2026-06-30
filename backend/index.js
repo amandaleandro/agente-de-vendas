@@ -8,6 +8,11 @@ const mammoth = require('mammoth');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const backupManager = require('./modules/backup');
+const webserver = require('./modules/webserver');
+const chatStore = require('./modules/chat-store'); // Armazena conversas no painel
+const crossWarmupManager = require('./modules/cross-warmup');
+const gatilhos = require('./modules/gatilhos');
 const WarmupManager = require('./modules/warmup');
 const MessageTank = require('./modules/tank');
 const MetricsManager = require('./modules/metrics');
@@ -23,7 +28,9 @@ const DiagnosticoPrompt = require('./modules/diagnostico-prompt');
 const ProspeccaoHistorico = require('./modules/prospeccao-historico');
 const ProspeccaoAgenda = require('./modules/prospeccao-agenda');
 const APIPerspeccao = require('./modules/api-prospeccao');
-require('dotenv').config({ path: require('path').join(__dirname, 'config', '.env') });
+// Inicializa variáveis de ambiente primeiro com OVERRIDE
+// Isso garante que se o usuário mudar a configuração pelo painel UI (.env local), ela vença as variáveis estáticas do Docker
+require('dotenv').config({ path: require('path').join(__dirname, 'config', '.env'), override: true });
 
 let sock;
 const socketsConectados = new Map();
@@ -35,6 +42,42 @@ global.socketsConectados = socketsConectados;
 global.qrPorSessao = qrPorSessao;
 global.prospeccaoAgenda = null; // Será inicializado depois
 global.apiPerspeccao = null; // Será inicializado depois
+
+const motivosDesconexao = new Map();
+global.motivosDesconexao = motivosDesconexao;
+
+global.limparSessao = async (sessao) => {
+  const s = parseInt(sessao);
+  try {
+    const socket = socketsConectados.get(s);
+    if (socket) {
+      socket.logout('User requested logout');
+      socketsConectados.delete(s);
+    }
+  } catch (err) {}
+  
+  const authPath = path.join(__dirname, 'sessions', `auth_info_${s}`);
+  if (fs.existsSync(authPath)) {
+    fs.rmSync(authPath, { recursive: true, force: true });
+  }
+  qrPorSessao.delete(s);
+  motivosDesconexao.delete(s);
+  if (typeof conectar === 'function') conectar(s);
+};
+
+global.reconectarSessao = async (sessao) => {
+  const s = parseInt(sessao);
+  try {
+    const socket = socketsConectados.get(s);
+    if (socket) {
+      socket.end(new Error('User requested reconnect'));
+      socketsConectados.delete(s);
+    }
+  } catch (err) {}
+  motivosDesconexao.delete(s);
+  if (typeof conectar === 'function') conectar(s);
+};
+
 const etapasPorContato = new Map();
 const historicosPorContato = new Map();
 const atendimentosHumanos = new Set();
@@ -97,8 +140,10 @@ const TEMPO_RETORNO_IA_MS = 10 * 60 * 1000;
 const metrics = new MetricsManager();
 const security = new SecurityManager();
 const diagnosticoPrompt = new DiagnosticoPrompt();
-const prospeccaoHistorico = new ProspeccaoHistorico(__dirname);
-const prospeccaoAgendaLocal = new ProspeccaoAgenda(__dirname);
+const prospeccaoHistorico = new ProspeccaoHistorico();
+global.prospeccaoHistorico = prospeccaoHistorico;
+const FollowupManager = require('./modules/followup-manager');
+const prospeccaoAgendaLocal = new ProspeccaoAgenda();
 global.prospeccaoAgenda = prospeccaoAgendaLocal; // Exportar para APIs
 global.apiPerspeccao = new APIPerspeccao(prospeccaoAgendaLocal); // Exportar para APIs
 let diagnosticoManager = null; // Será inicializado após pool estar pronto
@@ -324,9 +369,10 @@ async function executarProspeccao() {
     try {
       const consulta = await socketEnvio.onWhatsApp(lead.telefone);
       if (!consulta?.[0]?.exists) throw new Error('número não está no WhatsApp');
+      const jidCorreto = consulta[0].jid;
       const identidade = identidadeDaSessao(sessao);
       const mensagem = await criarMensagemProspeccao(lead, identidade);
-      await enviarPeloBot(socketEnvio, `${lead.telefone}@s.whatsapp.net`, { text: mensagem }, sessao);
+      await enviarPeloBot(socketEnvio, jidCorreto, { text: mensagem }, sessao);
       registrarProspeccao({ ...lead, status: 'enviado', mensagem, sessao, perfil: identidade.nome });
       const status = warmup.obterStatusWarmup(sessao);
       console.log(`✅ ${lead.nome} (${status.enviados}/${status.quota})`);
@@ -418,9 +464,10 @@ async function executarProspeccaoAgendada() {
     try {
       const consulta = await socketEnvio.onWhatsApp(lead.telefone);
       if (!consulta?.[0]?.exists) throw new Error('número não está no WhatsApp');
+      const jidCorreto = consulta[0].jid;
       const identidade = identidadeDaSessao(sessao);
       const mensagem = await criarMensagemProspeccao(lead, identidade);
-      await enviarPeloBot(socketEnvio, `${lead.telefone}@s.whatsapp.net`, { text: mensagem }, sessao);
+      await enviarPeloBot(socketEnvio, jidCorreto, { text: mensagem }, sessao);
       registrarProspeccao({ ...lead, status: 'enviado', mensagem, sessao, perfil: identidade.nome });
       const status = warmup.obterStatusWarmup(sessao);
       console.log(`✅ ${lead.nome} (${status.enviados}/${status.quota})`);
@@ -995,7 +1042,8 @@ async function salvarLead(telefone, entrada, resposta) {
 
 // Conectar WhatsApp
 async function conectar(sessao = 1) {
-  const { state, saveCreds } = await useMultiFileAuthState(sessao === 1 ? 'auth_info' : `auth_info_${sessao}`);
+  const authPath = require('path').join(__dirname, 'sessions', `auth_info_${sessao}`);
+  const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
   const socketAtual = makeWASocket({
     auth: state,
@@ -1024,7 +1072,16 @@ async function conectar(sessao = 1) {
       socketsConectados.delete(sessao);
       qrGenerated = false;
       const statusCode = lastDisconnect?.error?.output?.statusCode;
-      console.log(`Conexão encerrada (${statusCode || 'sem código'}): ${lastDisconnect?.error?.message || 'motivo desconhecido'}`);
+      const erroMensagem = lastDisconnect?.error?.message || 'Motivo desconhecido';
+      console.log(`Conexão encerrada (${statusCode || 'sem código'}): ${erroMensagem}`);
+      
+      let razaoUsuario = erroMensagem;
+      if (statusCode === DisconnectReason.loggedOut) razaoUsuario = "Desconectado no celular (Logged Out)";
+      else if (statusCode === 440) razaoUsuario = "Conexão substituída";
+      else if (statusCode === 408) razaoUsuario = "Esgotou tempo limite (Timeout)";
+      else if (statusCode === 515) razaoUsuario = "Reinicialização necessária";
+      
+      motivosDesconexao.set(sessao, razaoUsuario);
 
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 440;
       if (!shouldReconnect) {
@@ -1063,6 +1120,12 @@ async function conectar(sessao = 1) {
   socketAtual.ev.on('creds.update', saveCreds);
 
   socketAtual.ev.on('messages.upsert', async (m) => {
+    // 🛡️ Filtro de Números Ativos para a IA
+    const ativos = process.env.BOT_NUMEROS_ATIVOS ? process.env.BOT_NUMEROS_ATIVOS.split(',') : [sessao.toString()];
+    if (!ativos.includes(sessao.toString())) {
+      return; // A IA ignora silenciosamente se o número atual não estiver habilitado
+    }
+
     const message = m.messages[0];
 
     if (!message.message) return;
@@ -1072,8 +1135,56 @@ async function conectar(sessao = 1) {
     const texto = message.message.conversation ||
                   message.message.extendedTextMessage?.text ||
                   infoMidia?.texto || '';
+    const name = message.pushName || '';
+
+    // 🛡️ Ignorar mensagens de protocolo/sistema vazias
+    if (!texto && !infoMidia && !message.message.pollCreationMessage) {
+      return;
+    }
+
+    // 🛡️ Prevenção de loop da IA entre chips da própria rede
+    const isInternalBot = global.socketsConectados && Array.from(global.socketsConectados.values()).some(s => {
+      if (s && s.user && s.user.id) {
+        return sender.startsWith(s.user.id.split(':')[0]);
+      }
+      return false;
+    });
+
+    if (isInternalBot && !message.key.fromMe) {
+      // É uma mensagem do warmup cruzado. Ignoramos para a IA, mas adicionamos no painel de conversas.
+      chatStore.addMessage(sessao, sender, name, {
+        id: message.key.id,
+        text: texto || '[Mídia]',
+        fromMe: false,
+        timestamp: (message.messageTimestamp || Math.floor(Date.now()/1000)) * 1000,
+        read: false
+      });
+      return; 
+    }
+    
+    // Adiciona ao chatStore do painel
+    chatStore.addMessage(sessao, sender, name, {
+      id: message.key.id,
+      text: texto || (infoMidia ? `[${infoMidia.tipo}]` : '[Sistema]'),
+      fromMe: message.key.fromMe,
+      timestamp: (message.messageTimestamp || Math.floor(Date.now()/1000)) * 1000,
+      read: message.key.fromMe // assumindo lido se foi nós quem mandou
+    });
+
+    const chaveAtendimento = `${sessao}:${sender}`;
+
     if (message.key.fromMe) {
       const foiEnviadaPeloBot = mensagensEnviadasPeloBot.has(message.key.id) || enviosBotEmAndamento.has(sender);
+      
+      // Marcar no chatStore que foi enviada pelo bot se aplicável
+      if (foiEnviadaPeloBot) {
+        const chats = chatStore.chats.get(sessao);
+        if (chats && chats.has(sender)) {
+          const arr = chats.get(sender).messages;
+          if (arr.length > 0) arr[arr.length - 1].isBot = true;
+        }
+      }
+
       if (!foiEnviadaPeloBot && sender && !sender.endsWith('@g.us')) {
         const chaveAtendimento = `${sessao}:${sender}`;
         atendimentosHumanos.add(chaveAtendimento);
@@ -1087,6 +1198,34 @@ async function conectar(sessao = 1) {
     }
 
     if (!texto.trim()) return;
+
+    // 🛡️ Verificar pedido de Humano
+    if (gatilhos.clientePedeHumano(texto)) {
+      console.log(`🚨 Cliente ${sender} solicitou atendimento humano.`);
+      atendimentosHumanos.add(chaveAtendimento);
+      historicosPorContato.delete(chaveAtendimento);
+      chatStore.setRequiresAttention(sessao, sender, true);
+      await socketAtual.sendMessage(sender, { text: "Certo, vou transferir você para um de nossos especialistas. Aguarde um momento por favor." });
+      return;
+    }
+
+    // ⚡ Verificar Gatilhos Rápidos
+    const respostaRapida = gatilhos.verificarGatilhoRapido(texto);
+    if (respostaRapida) {
+      console.log(`⚡ Gatilho rápido acionado para ${sender}`);
+      await socketAtual.sendMessage(sender, { text: respostaRapida });
+      
+      // Registrar envio bot no chatStore
+      chatStore.addMessage(sessao, sender, null, {
+        id: 'gatilho_' + Date.now(),
+        text: respostaRapida,
+        fromMe: true,
+        timestamp: Date.now(),
+        read: true,
+        isBot: true
+      });
+      return;
+    }
 
     if (atendimentosHumanos.has(`${sessao}:${sender}`)) {
       const chaveAtendimento = `${sessao}:${sender}`;
@@ -1134,8 +1273,28 @@ async function conectar(sessao = 1) {
         }
       }
 
-      const resposta = await gerarResposta(texto, sender, midia, identidade, 0, diagnosticoContexto);
-      await salvarLead(sender, texto, resposta);
+      let textoReal = texto;
+      
+      // Transcrição de áudio (se for áudio e tivermos midia + gemini)
+      if (infoMidia?.tipo === 'audio' && midia && gemini) {
+        console.log(`🎤 Transcrevendo áudio recebido de ${sender}...`);
+        try {
+          const transcricao = await transcreverAudioGemini(midia.buffer, midia.mimetype);
+          if (transcricao) {
+            textoReal = `[Áudio Transcrito do Cliente]: ${transcricao}`;
+            console.log(`📝 Áudio transcrito: "${transcricao}"`);
+          } else {
+            console.log(`⚠️ Áudio não pôde ser transcrito.`);
+            textoReal = "[Áudio recebido, mas não pôde ser transcrito]";
+          }
+        } catch (e) {
+          console.error(`❌ Erro na transcrição:`, e.message);
+          textoReal = "[Erro ao transcrever áudio do cliente]";
+        }
+      }
+
+      const resposta = await gerarResposta(textoReal, sender, midia, identidade, 0, diagnosticoContexto);
+      await salvarLead(sender, textoReal, resposta);
 
       // Rastrear resposta para campanha Tank (se aplicável)
       const telefoneLimpo = sender.split('@')[0];
@@ -1387,9 +1546,45 @@ async function iniciar() {
   }
 
   await carregarBaseConhecimento();
+
+  crossWarmupManager.iniciar(60); // Inicia o warmup cruzado a cada 60 min
+  
+  const followupManager = new FollowupManager(process.env.GEMINI_API_KEY, async (destinatario, texto, sessao) => {
+    const socket = socketsConectados.get(sessao);
+    if (!socket) throw new Error(`Socket da sessão ${sessao} não conectado`);
+    
+    await enviarPeloBot(socket, destinatario, { text: texto }, sessao);
+    
+    // Adicionar no chatStore para aparecer no painel
+    chatStore.addMessage(sessao, destinatario, "Bot", {
+      id: 'foll_' + Date.now(),
+      text: texto,
+      fromMe: true,
+      timestamp: Date.now(),
+      read: true,
+      isBot: true
+    });
+  });
+  
+  // Rodar a rotina a cada 1 hora
+  setInterval(() => {
+    followupManager.analisarEEnviarFollowups();
+  }, 60 * 60 * 1000);
+  
+  // E rodar após 30 segundos da inicialização
+  setTimeout(() => {
+    followupManager.analisarEEnviarFollowups();
+  }, 30 * 1000);
+
   console.log('');
   const quantidadeNumeros = Math.max(1, Math.min(10, Number(process.env.WHATSAPP_NUMEROS) || 1));
-  for (let sessao = 1; sessao <= quantidadeNumeros; sessao++) await conectar(sessao);
+  for (let sessao = 1; sessao <= quantidadeNumeros; sessao++) {
+    await conectar(sessao);
+    if (sessao < quantidadeNumeros) {
+      console.log(`⏳ Aguardando 5 segundos antes de conectar a próxima sessão...`);
+      await new Promise(r => setTimeout(r, 5000));
+    }
+  }
 
   // Inicializa a API e o Frontend Unificado
   require('./modules/webserver').startServer();

@@ -1,0 +1,125 @@
+{
+  "fila": [],
+  "planilhaAtual": {
+    "nome": "hora_02.csv",
+    "caminho": "/app/backend/listas/hora_02.csv",
+    "contatos_totais": 20,
+    "contatos": [
+      {
+        "empresa/nome": "Constru Jota",
+        "telefone/whatsapp": "5534991329322"
+      },
+      {
+        "empresa/nome": "Davi Eletricista uberaba",
+        "telefone/whatsapp": "5534988311830"
+      },
+      {
+        "empresa/nome": "EMM Construtora",
+        "telefone/whatsapp": "5534991033101"
+      },
+      {
+        "empresa/nome": "JP eletricista uberaba",
+        "telefone/whatsapp": "5534996783056"
+      },
+      {
+        "empresa/nome": "Marques Pedreiro Carpinteiro",
+        "telefone/whatsapp": "5534984247962"
+      },
+      {
+        "empresa/nome": "Mega Construção",
+        "telefone/whatsapp": "5534988120289"
+      },
+      {
+        "empresa/nome": "Pedreiro Luis Carlos Fiusa Mendes",
+        "telefone/whatsapp": "5534998784737"
+      },
+      {
+        "empresa/nome": "Pedreiro webert",
+        "telefone/whatsapp": "5534999965622"
+      },
+      {
+        "empresa/nome": "So moveis - Móveis e consertos para escritório",
+        "telefone/whatsapp": "5534998670600"
+      },
+      {
+        "empresa/nome": "Solumais Estruturas Metálicas",
+        "telefone/whatsapp": "5534988038421"
+      },
+      {
+        "empresa/nome": "Tomé Pinturas",
+        "telefone/whatsapp": "5534988116088"
+      },
+      {
+        "empresa/nome": "WM BRITTO GESSO LTDA",
+        "telefone/whatsapp": "5534996339380"
+      },
+      {
+        "empresa/nome": "CABRAL SISTEMAS CONSTRUTIVOS",
+        "telefone/whatsapp": "5534999945999"
+      },
+      {
+        "empresa/nome": "Donizetti serviço hidráulicos e elétricos",
+        "telefone/whatsapp": "5534992363276"
+      },
+      {
+        "empresa/nome": "ELETRICISTA RODOLFO",
+        "telefone/whatsapp": "5534991653797"
+      },
+      {
+        "empresa/nome": "Michel Santos - Pedreiro MM construções",
+        "telefone/whatsapp": "5516997509849"
+      },
+      {
+        "empresa/nome": "Pretti Visual Mão de Obra Especializada em ACM.",
+        "telefone/whatsapp": "5516981777178"
+      },
+      {
+        "empresa/nome": "ConstruLean - Construtora Sorocaba",
+        "telefone/whatsapp": "5515998288512"
+      },
+      {
+        "empresa/nome": "Rap10 Reformas",
+        "telefone/whatsapp": "5517988189816"
+      },
+      {
+        "empresa/nome": "ARQUITETA DÉBORA PIERI",
+        "telefone/whatsapp": "5517991883103"
+      }
+    ]
+  },
+  "statusPlanilhas": {
+    "exemplo.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T01:07:03.679Z",
+      "contatos_totais": 5,
+      "contatos_enviados": 4,
+      "erros": 1,
+      "fim": "2026-06-30T01:22:08.936Z"
+    },
+    "hora_01.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T02:22:10.236Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 0,
+      "erros": 20,
+      "fim": "2026-06-30T03:22:10.188Z"
+    },
+    "lista-atual.csv": {
+      "status": "concluída",
+      "inicio": "2026-06-30T04:22:10.297Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 0,
+      "erros": 20,
+      "fim": "2026-06-30T05:22:10.230Z"
+    },
+    "hora_02.csv": {
+      "status": "executando",
+      "inicio": "2026-06-30T13:57:38.368Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 0,
+      "erros": 0
+    }
+  },
+  "proximaExecucao": "2026-06-30T06:22:10.230Z",
+  "dataSalvamento": "2026-06-30T13:57:38.368Z"
+}

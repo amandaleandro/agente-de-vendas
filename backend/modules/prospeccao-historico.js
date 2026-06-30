@@ -13,9 +13,9 @@ const path = require('path');
 
 class ProspeccaoHistorico {
   constructor(caminhoBase = __dirname) {
-    this.caminhoBase = path.dirname(caminhoBase); // Sobe um nível para backend/
-    this.arquivoResultados = path.join(this.caminhoBase, 'prospeccao_resultados.jsonl');
-    this.arquivoErros = path.join(this.caminhoBase, 'prospeccao_erros.jsonl');
+    this.caminhoBase = path.dirname(caminhoBase); // backend/
+    this.arquivoResultados = path.join(this.caminhoBase, 'listas', 'prospeccao_resultados.jsonl');
+    this.arquivoErros = path.join(this.caminhoBase, 'listas', 'prospeccao_erros.jsonl');
     this.historicoEmMemoria = new Map(); // telefone -> { enviado_em, status, sessao }
 
     this.carregarHistorico();
@@ -36,7 +36,9 @@ class ProspeccaoHistorico {
               this.historicoEmMemoria.set(registro.telefone, {
                 enviado_em: registro.data,
                 status: 'enviado',
-                sessao: registro.sessao
+                sessao: registro.sessao,
+                nome: registro.nome,
+                empresa: registro.empresa
               });
             }
           } catch (err) {
@@ -86,7 +88,9 @@ class ProspeccaoHistorico {
         this.historicoEmMemoria.set(dados.telefone, {
           enviado_em: registro.data,
           status: 'enviado',
-          sessao: dados.sessao
+          sessao: dados.sessao,
+          nome: dados.nome,
+          empresa: dados.empresa
         });
       }
 

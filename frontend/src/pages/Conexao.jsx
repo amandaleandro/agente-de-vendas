@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { QrCode, CheckCircle2, RefreshCw } from 'lucide-react';
+import { QrCode as QrCodeIcon, CheckCircle2, RefreshCw } from 'lucide-react';
+import QRCode from 'react-qr-code';
 
 export default function Conexao() {
   const [status, setStatus] = useState([]);
@@ -44,31 +45,53 @@ export default function Conexao() {
             {sessao.conectado ? (
               <div style={{ padding: '2rem 0' }}>
                 <CheckCircle2 size={48} color="#34d399" style={{ margin: '0 auto 1rem' }} />
-                <span className="badge badge-success">Conectado e Operacional</span>
+                <span className="badge badge-success" style={{ marginBottom: '1rem', display: 'inline-block' }}>Conectado e Operacional</span>
+                <div style={{ marginTop: '1rem' }}>
+                  <button className="btn btn-danger" onClick={async () => {
+                    if (window.confirm('Tem certeza que deseja desconectar? Você precisará ler o QR Code novamente.')) {
+                      await fetch(`/api/whatsapp/clear/${sessao.sessao}`, { method: 'POST' });
+                      fetchData();
+                    }
+                  }}>Desconectar</button>
+                </div>
               </div>
             ) : sessao.temQR && qrcodes[sessao.sessao] ? (
               <div>
                 <span className="badge badge-warning" style={{ marginBottom: '1rem', display: 'inline-block' }}>Aguardando Leitura</span>
                 <div style={{ 
-                  background: '#f8fafc', 
+                  background: '#fff', 
                   padding: '1rem', 
-                  borderRadius: '8px',
-                  fontFamily: 'monospace',
-                  fontSize: '8px',
-                  lineHeight: '1',
-                  color: '#000',
-                  maxHeight: '220px',
-                  overflowY: 'auto',
-                  wordBreak: 'break-all'
+                  borderRadius: '12px',
+                  display: 'inline-block',
+                  margin: '0 auto'
                 }}>
-                  {qrcodes[sessao.sessao]}
+                  <QRCode value={qrcodes[sessao.sessao]} size={200} />
                 </div>
                 <p style={{ fontSize: '0.875rem', marginTop: '1rem' }}>Abra o WhatsApp e leia o QR Code acima.</p>
               </div>
             ) : (
               <div style={{ padding: '2rem 0' }}>
-                <QrCode size={48} color="#94a3b8" style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
-                <span className="badge badge-error">Inicializando Sessão...</span>
+                <QrCodeIcon size={48} color="#94a3b8" style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
+                {sessao.motivo ? (
+                  <>
+                    <span className="badge badge-error" style={{ marginBottom: '0.5rem', display: 'inline-block' }}>Desconectado</span>
+                    <p style={{ color: 'var(--error)', fontSize: '0.875rem', marginBottom: '1rem' }}>Motivo: {sessao.motivo}</p>
+                  </>
+                ) : (
+                  <span className="badge badge-error" style={{ marginBottom: '1rem', display: 'inline-block' }}>Inicializando Sessão...</span>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                  <button className="btn btn-warning" onClick={async () => {
+                    await fetch(`/api/whatsapp/reconnect/${sessao.sessao}`, { method: 'POST' });
+                    fetchData();
+                  }}>Reconectar</button>
+                  <button className="btn btn-danger" onClick={async () => {
+                    if (window.confirm('Tem certeza que deseja limpar a conexão deste número? Você precisará ler o QR Code novamente.')) {
+                      await fetch(`/api/whatsapp/clear/${sessao.sessao}`, { method: 'POST' });
+                      fetchData();
+                    }
+                  }}>Limpar</button>
+                </div>
               </div>
             )}
           </div>

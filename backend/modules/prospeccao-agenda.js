@@ -17,7 +17,7 @@ class ProspeccaoAgenda {
   constructor(caminhoBase = __dirname) {
     this.caminhoBase = path.dirname(caminhoBase); // backend/
     this.diretorioPlanilhas = path.join(this.caminhoBase, 'listas');
-    this.arquivoEstado = path.join(this.caminhoBase, 'prospeccao_agenda.json');
+    this.arquivoEstado = path.join(this.diretorioPlanilhas, 'prospeccao_agenda.json');
 
     // Estado
     this.fila = [];
@@ -87,13 +87,22 @@ class ProspeccaoAgenda {
       for (const arquivo of arquivos) {
         const caminho = path.join(this.diretorioPlanilhas, arquivo);
         try {
-          const contatos = lerCsv(caminho);
-          if (contatos.length > 0) {
+          const contatosRaw = lerCsv(fs.readFileSync(caminho, 'utf8'));
+          if (contatosRaw.length > 1) {
+            const cabecalho = contatosRaw[0].map(c => c.toLowerCase().trim());
+            const contatosFormatados = contatosRaw.slice(1).map(linha => {
+              const obj = {};
+              cabecalho.forEach((col, idx) => {
+                obj[col] = linha[idx] || '';
+              });
+              return obj;
+            }).filter(c => Object.values(c).some(v => v.trim() !== ''));
+
             planilhas.push({
               nome: arquivo,
               caminho: caminho,
-              contatos_totais: contatos.length,
-              contatos: contatos
+              contatos_totais: contatosFormatados.length,
+              contatos: contatosFormatados
             });
           }
         } catch (err) {

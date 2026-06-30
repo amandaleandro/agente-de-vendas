@@ -21,6 +21,8 @@ services:
       - ./backend/sessions:/app/backend/sessions
       - ./backend/backups:/app/backend/backups
       - ./backend/arquivos:/app/backend/arquivos
+      - ./backend/config:/app/backend/config
+      - ./backend/listas:/app/backend/listas
     restart: unless-stopped
     networks:
       - fezinha-network
