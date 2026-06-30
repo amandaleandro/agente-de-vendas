@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare, Flame } from 'lucide-react';
 
 import Dashboard from './pages/Dashboard';
 import Conexao from './pages/Conexao';
@@ -9,6 +9,7 @@ import Configuracao from './pages/Configuracao';
 import Analytics from './pages/Analytics';
 import TerminalLogs from './pages/TerminalLogs';
 import Conversas from './pages/Conversas';
+import Warmup from './pages/Warmup';
 
 function App() {
   return (
@@ -35,6 +36,9 @@ function App() {
             <NavLink to="/conversas" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <MessageSquare size={20} /> Conversas
             </NavLink>
+            <NavLink to="/warmup" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Flame size={20} /> Warmup
+            </NavLink>
             <NavLink to="/configuracao" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Settings size={20} /> Configurações
             </NavLink>
@@ -52,6 +56,7 @@ function App() {
             <Route path="/conexao" element={<Conexao />} />
             <Route path="/prospeccao" element={<Prospeccao />} />
             <Route path="/conversas" element={<Conversas />} />
+            <Route path="/warmup" element={<Warmup />} />
             <Route path="/configuracao" element={<Configuracao />} />
             <Route path="/logs" element={<TerminalLogs />} />
           </Routes>
