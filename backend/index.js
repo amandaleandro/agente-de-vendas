@@ -1204,7 +1204,6 @@ async function conectar(sessao = 1) {
   socketAtual.ev.on('creds.update', saveCreds);
 
   socketAtual.ev.on('messages.upsert', async (m) => {
-    return; // DESATIVADO: Processamento de mensagens pausado
     // 🛡️ Filtro de Números Ativos para a IA
     const ativos = process.env.BOT_NUMEROS_ATIVOS
       ? process.env.BOT_NUMEROS_ATIVOS.split(',').map(n => n.trim()).filter(Boolean)
