@@ -3,9 +3,38 @@ const nlpLocal = require('./nlp-local');
 class RoteiroHeuristico {
   constructor() {
     this.etapasPorContato = new Map();
-    this.ultimasRespostasPorContato = new Map(); // Track last responses to avoid repetition
+    this.ultimasRespostasPorContato = new Map(); // Track all responses to avoid repetition
     this.URL_DIAGNOSTICO = 'https://fechapro.com.br/diagnostico';
     this.URL_COMPRA_ANUAL = 'https://fechapro.com.br/auth/signup?plan=annual';
+
+    // Alternativas para respostas comuns
+    this.alternativasPerguntasComuns = {
+      'qual_gargalo': [
+        'Qual é o seu maior problema então?',
+        'Me diz: qual é seu principal desafio?',
+        'Qual é a sua dor principal?',
+        'Qual parte mais te irrita no processo?',
+        'Qual é o seu maior obstáculo?'
+      ],
+      'como_envia': [
+        'E como você envia o orçamento hoje?',
+        'Tipo de proposta que você manda, é como?',
+        'Você manda como - só valor ou algo mais completo?',
+        'Qual é seu formato de proposta?'
+      ],
+      'cliente_some': [
+        'O cliente costuma sumir depois da proposta?',
+        'Ele some depois que você manda ou volta com dúvidas?',
+        'Fica no silêncio mesmo?',
+        'Você consegue acompanhar depois?'
+      ],
+      'qual_problema': [
+        'Então qual é exatamente seu problema?',
+        'Qual é a principal dificuldade sua?',
+        'E qual é o maior problema?',
+        'Qual sua maior dor?'
+      ]
+    };
   }
 
   async inicializar() {
@@ -23,20 +52,52 @@ class RoteiroHeuristico {
     return ultimasMsgs;
   }
 
-  ehRespetaRepetida(telefone, resposta) {
+  ehRespostaRepetida(telefone, resposta) {
     const historico = this.ultimasRespostasPorContato.get(telefone) || [];
-    const respostaNormalizada = resposta.toLowerCase().substring(0, 50);
+    // Normaliza removendo pontuação e espaços extras, pega primeiras palavras
+    const respostaNormalizada = resposta
+      .toLowerCase()
+      .replace(/[?.!,;]/g, '')
+      .trim()
+      .substring(0, 80); // Aumentado para melhor detecção
 
-    return historico.some(r =>
-      r.toLowerCase().substring(0, 50) === respostaNormalizada
-    );
+    return historico.some(r => {
+      const rNormalizada = r
+        .toLowerCase()
+        .replace(/[?.!,;]/g, '')
+        .trim()
+        .substring(0, 80);
+      return rNormalizada === respostaNormalizada;
+    });
   }
 
   registrarResposta(telefone, resposta) {
     const historico = this.ultimasRespostasPorContato.get(telefone) || [];
-    historico.push(resposta);
-    if (historico.length > 3) historico.shift();
-    this.ultimasRespostasPorContato.set(telefone, historico);
+    // Não adiciona se já existe
+    if (!this.ehRespostaRepetida(telefone, resposta)) {
+      historico.push(resposta);
+      // Mantém histórico de até 50 respostas por contato
+      if (historico.length > 50) historico.shift();
+      this.ultimasRespostasPorContato.set(telefone, historico);
+    }
+  }
+
+  obterAlternativaQuandoRepetida(telefone, tipoAlternativa) {
+    const alternativas = this.alternativasPerguntasComuns[tipoAlternativa] || [];
+    if (alternativas.length === 0) return null;
+
+    // Tenta encontrar uma alternativa que ainda não foi usada
+    const respostasUsadas = this.ultimasRespostasPorContato.get(telefone) || [];
+    const alternativaDisponivel = alternativas.find(alt => !this.ehRespostaRepetida(telefone, alt));
+
+    if (alternativaDisponivel) {
+      this.registrarResposta(telefone, alternativaDisponivel);
+      return alternativaDisponivel;
+    }
+
+    // Se todas as alternativas foram usadas, retorna uma aleatória
+    const resposta = alternativas[Math.floor(Math.random() * alternativas.length)];
+    return resposta;
   }
 
   async gerarResposta(texto, telefone, identidade = { nome: 'Amanda' }, historicMensagens = []) {
@@ -119,14 +180,9 @@ class RoteiroHeuristico {
         resposta = 'Então me diz: qual é o seu gargalo mesmo? É o cliente sumir, o preço ficar caro, ou é outra coisa?';
       }
 
-      if (this.ehRespetaRepetida(telefone, resposta)) {
-        const alternativas = [
-          'E aí, qual o seu maior problema?',
-          'Qual sua dor principal?',
-          'Me fala: qual é mesmo seu desafio?',
-          'Qual parte mais te irrita?'
-        ];
-        resposta = alternativas[Math.floor(Math.random() * alternativas.length)];
+      if (this.ehRespostaRepetida(telefone, resposta)) {
+        const alt = this.obterAlternativaQuandoRepetida(telefone, 'qual_gargalo');
+        if (alt) return alt;
       }
 
       this.registrarResposta(telefone, resposta);
@@ -145,8 +201,9 @@ class RoteiroHeuristico {
           resposta = 'Entendo. Mas me diz - você manda só o valor no WhatsApp ou manda uma proposta mais completa?';
         }
 
-        if (this.ehRespetaRepetida(telefone, resposta)) {
-          resposta = 'E como você envia hoje? Manda orçamento como?';
+        if (this.ehRespostaRepetida(telefone, resposta)) {
+          const alt = this.obterAlternativaQuandoRepetida(telefone, 'como_envia');
+          if (alt) return alt;
         }
 
         this.registrarResposta(telefone, resposta);
@@ -158,9 +215,9 @@ class RoteiroHeuristico {
       this.etapasPorContato.set(telefone, 'permissao_produto');
       const resposta = 'Então o problema não é tanto o preço em si, mas o cliente não ver o valor e você não conseguir acompanhar direito. Tá certo?';
 
-      if (this.ehRespetaRepetida(telefone, resposta)) {
-        this.registrarResposta(telefone, 'Basicamente é isso mesmo?');
-        return 'Basicamente é isso mesmo?';
+      if (this.ehRespostaRepetida(telefone, resposta)) {
+        const alt = this.obterAlternativaQuandoRepetida(telefone, 'qual_problema');
+        if (alt) return alt;
       }
 
       this.registrarResposta(telefone, resposta);
@@ -172,9 +229,10 @@ class RoteiroHeuristico {
         this.etapasPorContato.set(telefone, 'perguntou_produto');
         const resposta = `O FechaPro basicamente te ajuda a criar propostas profissionais e acompanhar o cliente depois. Deixa eu te mandar um diagnóstico rápido? ${this.URL_DIAGNOSTICO}`;
 
-        if (this.ehRespetaRepetida(telefone, resposta)) {
-          this.registrarResposta(telefone, `Vou te mandar um diagnóstico rápido: ${this.URL_DIAGNOSTICO}`);
-          return `Vou te mandar um diagnóstico rápido: ${this.URL_DIAGNOSTICO}`;
+        if (this.ehRespostaRepetida(telefone, resposta)) {
+          const alt = `Deixa eu mandar um diagnóstico pra você: ${this.URL_DIAGNOSTICO}`;
+          this.registrarResposta(telefone, alt);
+          return alt;
         }
 
         this.registrarResposta(telefone, resposta);
@@ -182,9 +240,9 @@ class RoteiroHeuristico {
       }
 
       const respostaPadrao = 'Tá bom. O que você sente que mais compromete suas vendas?';
-      if (this.ehRespetaRepetida(telefone, respostaPadrao)) {
-        this.registrarResposta(telefone, 'Qual seu maior obstáculo no processo de venda?');
-        return 'Qual seu maior obstáculo no processo de venda?';
+      if (this.ehRespostaRepetida(telefone, respostaPadrao)) {
+        const alt = this.obterAlternativaQuandoRepetida(telefone, 'qual_gargalo');
+        if (alt) return alt;
       }
 
       this.registrarResposta(telefone, respostaPadrao);
