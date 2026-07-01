@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare, Flame } from 'lucide-react';
+import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare, Flame, Brain } from 'lucide-react';
 
 import Dashboard from './pages/Dashboard';
 import Conexao from './pages/Conexao';
@@ -10,6 +10,9 @@ import Analytics from './pages/Analytics';
 import TerminalLogs from './pages/TerminalLogs';
 import Conversas from './pages/Conversas';
 import Warmup from './pages/Warmup';
+import LearningDashboard from './components/LearningDashboard';
+import LearningConfig from './pages/LearningConfig';
+import KnowledgeBase from './pages/KnowledgeBase';
 
 function App() {
   return (
@@ -39,6 +42,15 @@ function App() {
             <NavLink to="/warmup" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Flame size={20} /> Warmup
             </NavLink>
+            <NavLink to="/learning" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Brain size={20} /> Aprendizado Bot
+            </NavLink>
+            <NavLink to="/learning-config" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Settings size={20} /> Config. Learning
+            </NavLink>
+            <NavLink to="/knowledge-base" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Brain size={20} /> Base de Conhecimento
+            </NavLink>
             <NavLink to="/configuracao" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Settings size={20} /> Configurações
             </NavLink>
@@ -57,6 +69,9 @@ function App() {
             <Route path="/prospeccao" element={<Prospeccao />} />
             <Route path="/conversas" element={<Conversas />} />
             <Route path="/warmup" element={<Warmup />} />
+            <Route path="/learning" element={<LearningDashboard />} />
+            <Route path="/learning-config" element={<LearningConfig />} />
+            <Route path="/knowledge-base" element={<KnowledgeBase />} />
             <Route path="/configuracao" element={<Configuracao />} />
             <Route path="/logs" element={<TerminalLogs />} />
           </Routes>

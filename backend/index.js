@@ -33,6 +33,9 @@ const APIPerspeccao = require('./modules/api-prospeccao');
 const TrainerService = require('./modules/trainer-service');
 const LeadScorer = require('./modules/lead-scorer');
 const FollowupScheduler = require('./modules/followup-scheduler');
+const learningManager = require('./modules/learning-manager');
+const autoRetrain = require('./modules/auto-retrain');
+const knowledgeBase = require('./modules/knowledge-base');
 // Inicializa variáveis de ambiente primeiro com OVERRIDE
 // Isso garante que se o usuário mudar a configuração pelo painel UI (.env local), ela vença as variáveis estáticas do Docker
 require('dotenv').config({ path: require('path').join(__dirname, 'config', '.env'), override: true });
@@ -778,6 +781,20 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
   // Construir system instruction com contexto de diagnóstico se disponível
   let systemInstruction = `${INSTRUCOES_GEMINI}\n\nLINK OFICIAL DO DIAGNÓSTICO: Ao oferecer ou enviar o diagnóstico, use sempre ${URL_DIAGNOSTICO}.\n\nIDENTIDADE DESTE PERFIL: Você atende em nome de ${identidade.nome}, integrante do FechaPro, mas NÃO cite o FechaPro antes da pessoa perguntar, demonstrar abertura ou aceitar ver uma solução. Fale em primeira pessoa com estilo ${identidade.estilo}. Não use o nome Fezinha. Não afirme que a mensagem foi digitada pessoalmente e não negue automação se perguntarem.\n\nBASE OFICIAL DO FECHAPRO:\n${baseConhecimento || 'Nenhuma base oficial carregada.'}`;
 
+  // Integrar contexto da Knowledge Base se houver materiais relevantes
+  try {
+    const materiaisRelevantes = knowledgeBase.buscarContextoRelevante(texto, 2);
+    if (materiaisRelevantes.length > 0) {
+      systemInstruction += `\n\n📚 MATERIAIS DE CONHECIMENTO RELEVANTES:\n`;
+      materiaisRelevantes.forEach((material) => {
+        systemInstruction += `\n▪ ${material.titulo}\n${material.conteudo}\n`;
+      });
+      systemInstruction += `\n(Use essas informações quando relevante para a conversa)`;
+    }
+  } catch (err) {
+    console.warn('Erro ao buscar Knowledge Base:', err.message);
+  }
+
   // Se há diagnóstico, adicionar ao contexto
   if (diagnosticoContexto) {
     const diagFormatado = diagnosticoPrompt.construirPromptComContexto(diagnosticoContexto);
@@ -1173,6 +1190,11 @@ async function conectar(sessao = 1) {
     printQRInTerminal: false,
     browser: Browsers.ubuntu('Desktop'),
     logger: pino({ level: 'silent' }),
+    // Melhorar estabilidade de conexão
+    defaultQueryTimeoutMs: 60000,
+    shouldSyncHistoryMessage: false,
+    syncFullHistory: false,
+    retryRequestDelayMs: 100,
   });
 
   if (sessao === 1) sock = socketAtual;

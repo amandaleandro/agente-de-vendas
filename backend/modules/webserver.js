@@ -3,6 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const apiProspeccao = require('./api-prospeccao');
 const chatStore = require('./chat-store');
+const learningManager = require('./learning-manager');
+const NLPRetrain = require('./nlp-retrain');
+const autoRetrain = require('./auto-retrain');
+const alertSystem = require('./alert-system');
+const responseSelector = require('./response-selector');
+const slackNotifications = require('./slack-notifications');
+const knowledgeBase = require('./knowledge-base');
 
 const PORT = 3099;
 
@@ -852,6 +859,309 @@ const server = http.createServer((req, res) => {
           });
         } catch (e) {
           return json(500, { erro: e.message });
+        }
+      }
+
+      // ===== LEARNING ENDPOINTS =====
+      if (url === '/api/learning/stats') {
+        const filtro = {};
+        const params = new URLSearchParams(req.url.split('?')[1] || '');
+        if (params.has('resultado')) filtro.resultado = params.get('resultado');
+        if (params.has('dataApos')) filtro.dataApos = params.get('dataApos');
+
+        const stats = learningManager.analisarConversas(filtro);
+        return json(200, stats);
+      }
+
+      if (url === '/api/learning/padroes') {
+        const params = new URLSearchParams(req.url.split('?')[1] || '');
+        const intencao = params.get('intencao');
+        const limite = parseInt(params.get('limite')) || 10;
+
+        if (intencao) {
+          const melhores = learningManager.obterMelhoresRespostas(intencao, limite);
+          return json(200, { intencao, respostas: melhores });
+        } else {
+          const padroes = Array.from(learningManager.padroesSucesso.values())
+            .sort((a, b) => b.taxaSucesso - a.taxaSucesso)
+            .slice(0, 50);
+          return json(200, { total: learningManager.padroesSucesso.size, padroes });
+        }
+      }
+
+      if (url === '/api/learning/conversas') {
+        const params = new URLSearchParams(req.url.split('?')[1] || '');
+        const limite = parseInt(params.get('limite')) || 20;
+        const conversas = learningManager.obterUltimasConversas(limite);
+        return json(200, conversas);
+      }
+
+      if (url === '/api/learning/export/csv') {
+        const csv = learningManager.exportarCSV();
+        res.writeHead(200, {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': 'attachment; filename="conversas_bot.csv"'
+        });
+        return res.end(csv);
+      }
+
+      if (url === '/api/learning/treinamento') {
+        const dados = learningManager.gerarDadosTreinamento();
+        return json(200, {
+          novasFrases: dados.novasFrases.length,
+          detalhes: dados.novasFrases.slice(0, 50)
+        });
+      }
+
+      if (url === '/api/learning/health') {
+        const stats = learningManager.analisarConversas();
+        const padroes = learningManager.padroesSucesso.size;
+        const emProgresso = learningManager.conversasEmProgresso.size;
+
+        return json(200, {
+          status: 'ok',
+          conversas: {
+            total: stats.total,
+            sucessos: stats.sucessos,
+            fracassos: stats.fracassos,
+            taxa_sucesso: `${stats.taxa_sucesso}%`
+          },
+          padroes,
+          emProgresso
+        });
+      }
+
+      if (req.method === 'POST' && url === '/api/learning/registrar-sucesso') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { telefone, motivo } = JSON.parse(body);
+            if (!telefone) return json(400, { erro: 'telefone é obrigatório' });
+            learningManager.registrarResultado(telefone, 'sucesso', motivo || 'manual');
+            return json(200, { sucesso: true, mensagem: 'Conversa registrada como sucesso' });
+          } catch (err) {
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      if (req.method === 'POST' && url === '/api/learning/registrar-fracasso') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { telefone, motivo } = JSON.parse(body);
+            if (!telefone) return json(400, { erro: 'telefone é obrigatório' });
+            learningManager.registrarResultado(telefone, 'fracasso', motivo || 'manual');
+            return json(200, { sucesso: true, mensagem: 'Conversa registrada como fracasso' });
+          } catch (err) {
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      if (req.method === 'POST' && url === '/api/learning/recomendacao') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { intencao, respostasUsadas } = JSON.parse(body);
+            if (!intencao) return json(400, { erro: 'intencao é obrigatória' });
+            const resposta = learningManager.recomendarResposta(intencao, respostasUsadas || []);
+            if (resposta) {
+              return json(200, { sucesso: true, resposta });
+            } else {
+              return json(200, { sucesso: false, mensagem: 'Nenhuma recomendação disponível' });
+            }
+          } catch (err) {
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      if (req.method === 'POST' && url === '/api/learning/retreinar') {
+        const retrain = new NLPRetrain();
+        return retrain.retreinarComNovosPadroes()
+          .then(resultado => json(200, { sucesso: true, resultado }))
+          .catch(err => json(500, { erro: err.message }));
+      }
+
+      if (url === '/api/learning/relatorio') {
+        const retrain = new NLPRetrain();
+        const relatorio = retrain.gerarRelatorioDeMelhoria();
+        return json(200, relatorio);
+      }
+
+      if (url === '/api/learning/falhas') {
+        const retrain = new NLPRetrain();
+        const analise = retrain.analisarFalhas();
+        return json(200, analise);
+      }
+
+      // ===== AUTO RETRAIN ENDPOINTS =====
+      if (url === '/api/learning/auto-retrain/status') {
+        const status = autoRetrain.getStatus();
+        return json(200, status);
+      }
+
+      if (req.method === 'POST' && url === '/api/learning/auto-retrain/forca') {
+        return autoRetrain.forcaRetreino()
+          .then(resultado => json(200, { sucesso: true, resultado }))
+          .catch(err => json(500, { erro: err.message }));
+      }
+
+      if (req.method === 'POST' && url === '/api/learning/auto-retrain/configurar') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const config = JSON.parse(body);
+            autoRetrain.configurar(config);
+            return json(200, { sucesso: true, config });
+          } catch (err) {
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      // ===== ALERT SYSTEM ENDPOINTS =====
+      if (url === '/api/learning/alerts/status') {
+        const status = alertSystem.getStatus();
+        return json(200, status);
+      }
+
+      if (url === '/api/learning/alerts/lista') {
+        const alertas = alertSystem.getAlertas();
+        return json(200, { alertas, total: alertas.length });
+      }
+
+      if (req.method === 'POST' && url === '/api/learning/alerts/configurar') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const config = JSON.parse(body);
+            alertSystem.configurar(config);
+            return json(200, { sucesso: true, config: alertSystem.thresholds });
+          } catch (err) {
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      // ===== RESPONSE SELECTOR ENDPOINTS =====
+      if (url === '/api/learning/responses/status') {
+        const status = responseSelector.getStatus();
+        return json(200, status);
+      }
+
+      if (req.method === 'POST' && url === '/api/learning/responses/melhor') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { intencao, resposta_padrao, respostas_usadas } = JSON.parse(body);
+            const melhor = responseSelector.obterMelhorResposta(
+              intencao,
+              resposta_padrao,
+              respostas_usadas
+            );
+            return json(200, { resposta: melhor, otimizada: melhor !== resposta_padrao });
+          } catch (err) {
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      if (req.method === 'POST' && url === '/api/learning/responses/configurar') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const config = JSON.parse(body);
+            responseSelector.configurar(config);
+            return json(200, { sucesso: true, status: responseSelector.getStatus() });
+          } catch (err) {
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      // ===== SLACK NOTIFICATIONS ENDPOINTS =====
+      if (url === '/api/learning/slack/status') {
+        return json(200, { enabled: slackNotifications.enabled });
+      }
+
+      if (req.method === 'POST' && url === '/api/learning/slack/teste') {
+        return slackNotifications.enviar(
+          '🧪 Teste de Conexão',
+          'Slack conectado com sucesso ao sistema de Learning!',
+          [{ title: 'Timestamp', value: new Date().toISOString(), short: false }],
+          '#3b82f6'
+        ).then(() => json(200, { sucesso: true }))
+         .catch(err => json(500, { erro: err.message }));
+      }
+
+      // ===== KNOWLEDGE BASE ENDPOINTS =====
+      if (url === '/api/knowledge' && req.method === 'GET') {
+        try {
+          const materiais = knowledgeBase.listarTodos();
+          const stats = knowledgeBase.obterEstatisticas();
+          return json(200, { materiais, stats });
+        } catch (err) {
+          return json(500, { erro: err.message });
+        }
+      }
+
+      if (url === '/api/knowledge' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const material = JSON.parse(body);
+            const novo = knowledgeBase.adicionar(material);
+            return json(201, { sucesso: true, material: novo });
+          } catch (err) {
+            return json(400, { erro: err.message });
+          }
+        });
+      }
+
+      if (url.startsWith('/api/knowledge/') && req.method === 'PUT') {
+        const id = url.split('/').pop();
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const dados = JSON.parse(body);
+            const atualizado = knowledgeBase.atualizar(id, dados);
+            return json(200, { sucesso: true, material: atualizado });
+          } catch (err) {
+            return json(400, { erro: err.message });
+          }
+        });
+      }
+
+      if (url.startsWith('/api/knowledge/') && req.method === 'DELETE') {
+        const id = url.split('/').pop();
+        try {
+          knowledgeBase.deletar(id);
+          return json(200, { sucesso: true, mensagem: 'Material deletado com sucesso' });
+        } catch (err) {
+          return json(400, { erro: err.message });
+        }
+      }
+
+      if (url.startsWith('/api/knowledge/search') && req.method === 'GET') {
+        try {
+          const queryString = url.split('?')[1] || '';
+          const params = new URLSearchParams(queryString);
+          const query = params.get('q') || '';
+          const contexto = knowledgeBase.buscarContextoRelevante(query, 5);
+          return json(200, { resultados: contexto, query });
+        } catch (err) {
+          return json(500, { erro: err.message });
         }
       }
 
