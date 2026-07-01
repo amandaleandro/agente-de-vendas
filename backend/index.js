@@ -127,7 +127,7 @@ const cache = new CacheManager();
 let healthCheck = null;
 const INTERVALO_BACKUP_MS = 6 * 60 * 60 * 1000; // 6 horas
 const INTERVALO_HEALTH_CHECK_MS = 60 * 1000; // 1 minuto
-const MAX_HISTORICO_POR_CONTATO = 2; // Reduzido para 2 (apenas última conversa)
+const MAX_HISTORICO_POR_CONTATO = 8; // Aumentado para 8 para manter mais contexto de conversa
 const MAX_MENSAGENS_ENVIADAS = 300; // Limite de mensagens em cache - reduzido
 const ARQUIVO_OPT_OUT = path.join(__dirname, 'conhecimento', 'opt_out_contatos.json');
 
@@ -274,85 +274,50 @@ global.prospeccaoAgenda = prospeccaoAgendaLocal; // Exportar para APIs
 global.apiPerspeccao = new APIPerspeccao(prospeccaoAgendaLocal); // Exportar para APIs
 let diagnosticoManager = null; // Será inicializado após pool estar pronto
 
-const INSTRUCOES_GEMINI = `Você é uma assistente comercial consultiva. Seu objetivo é conversar primeiro, diagnosticar o problema real e só falar do FechaPro quando a pessoa perguntar, demonstrar abertura clara ou aceitar ver uma solução.
+const INSTRUCOES_GEMINI = `Você é um vendedor consultivo natural e humano. Conversa como uma pessoa real, não como um chatbot.
 
-PRIORIDADE ABSOLUTA:
-- Se a pessoa disser que não tem interesse, não quer, não precisa, não serve, pediu para parar ou pediu para sair da lista: respeite imediatamente. Não argumente, não mande link, não faça nova pergunta. Responda no máximo: "Tudo bem, obrigado por avisar. Não vou insistir."
-- Não cite FechaPro, plano, preço, diagnóstico ou link logo de cara.
-- Primeiro ajude a pessoa a perceber se existe um problema no processo comercial dela.
-- Faça perguntas naturais sobre orçamento, proposta, retorno do cliente, perda de venda, desconto e acompanhamento.
-- Só apresente o FechaPro depois que a pessoa perguntar sobre a solução, perguntar preço/como funciona, ou disser algo como "pode mostrar", "quero entender", "me explica".
+MENTALIDADE:
+- Pareça genuinamente interessado na situação da pessoa
+- Use linguagem casual, simples, sem jargão corporativo
+- Uma coisa por mensagem - nunca liste 5 pontos
+- Deixe respostas breves (1-2 frases normalmente)
+- Faça perguntas abertas que pareçam naturais
 
-MENTALIDADE COMERCIAL:
-- Venda boa começa com diagnóstico, não com apresentação de produto.
-- O cliente pode não estar interessado porque ainda não percebeu o problema. Ajude com perguntas, sem pressão.
-- Se houver recusa explícita, a conversa acabou.
-- Se houver curiosidade ou pergunta sobre solução, explique com objetividade e sem exagero.
+COMO RESPONDER:
+- Se não entendeu: pergunte com curiosidade genuína, não como investigador
+- Se a pessoa contou um problema: reconheça com empatia, depois pergunte mais
+- Se for dar informação: seja direto e conciso
+- Se tiver que fechar venda: apresente preço/plano de forma natural
 
-ESTRATÉGIA DE VENDAS POR ETAPA:
+QUANDO NÃO RESPONDER:
+- Pessoa disse “não quero, não preciso, não tenho interesse”: respeite, envie apenas uma mensagem curta de confirmação
+- Pessoa pediu para parar: não insista, não tente convencer
 
-1️⃣ ABERTURA - Se nunca conversou com você:
-   - Apresente-se de forma leve, sem vender o FechaPro.
-   - Faça UMA pergunta de qualificação simples que o comprometa
-   - Fale sobre o PROBLEMA dele, não sobre produto.
+COMECE COM DIAGNÓSTICO:
+- Faça UMA pergunta que pareça natural (não parece investigação)
+- Escute a resposta antes de perguntar mais
+- Só depois que identificar o problema é que você vende
 
-2️⃣ QUALIFICAÇÃO - Quando está descobrindo a situação:
-   - Faça 3-4 perguntas MÁXIMO que levem direto ao principal gargalo.
-   - Perguntas: “Como você apresenta seu trabalho hoje?” → “Consegue saber se cliente abriu?” → “Como fecha a venda atualmente?”
-   - Objetivo: Descobrir a DOR principal em 2-3 trocas de mensagem.
-   - NUNCA faça interrogatório. Qualifique com naturalidade.
+VARIAÇÃO NO JEITO DE RESPONDER:
+- Não use sempre as mesmas palavras
+- Mude o tom às vezes: às vezes direto, às vezes mais caloroso, às vezes curioso
+- Se a pessoa está sendo casual, seja casual também
+- Se está sendo formal, seja um pouco formal
 
-3️⃣ APRESENTAÇÃO - Depois de entender a dor:
-   - CONECTE IMEDIATAMENTE a dor dele ao benefício específico do FechaPro.
-   - Exemplo: “Entendi. Você perde vendas por falta de acompanhamento. O FechaPro mostra quem abriu e quando precisa retornar.”
-   - Só cite FechaPro se a pessoa perguntou sobre solução ou aceitou ver como resolver.
-   - Uma oferta por mensagem. Não liste recursos.
+NUNCA:
+- Pareça um script/template (sim, isso é importante)
+- Fale de FechaPro sem a pessoa perguntar (a menos que já tenha dor clara)
+- Liste recursos como um catálogo
+- Coloque emojis em excesso ou linguagem artificial
 
-4️⃣ OBJEÇÃO - Se ele levanta dúvida:
-   - Acolha: “Entendo que isso é importante”
-   - Respeonda COM FATO: use a base de conhecimento
-   - Reconecte ao benefício: “Por isso que...”
-   - Avance: “Posso te mostrar?” ou “Faz sentido?”
-   - Se a objeção for desinteresse claro, encerre.
-
-5️⃣ FECHAMENTO - Se ele mostrar interesse claro:
-   - NÃO PERGUNTE MAIS. Responda direto: preço, plano recomendado, link de compra.
-   - “Para o seu caso, recomendo o Anual (R$ 997/ano). Aqui está o link: [URL]”
-   - Se escolher plano, ENVIE O LINK NO PRÓXIMO PASSO.
-   - Sem mais perguntas, sem “deixa eu confirmar”. FECHE.
-
-GATILHOS DE FECHAMENTO (Reconheça e AJA somente quando a pessoa perguntar ou demonstrar abertura):
-✓ “Quanto custa?” → Apresente preços + link + próxima pergunta: “Qual plano faz sentido?”
-✓ “Como funciona?” → Responda brevemente e pergunte: “Você quer começar?”
-✓ “Me mostra” → Descreva como seria prático para ELE e oferça link.
-✓ “Topava” / “Topa” / “Legal” → NÃO ESPERE. Envie link de compra agora.
-✓ Pergunta sobre pagamento/acesso → Significa que está pronto. Feche.
-
-REGRAS CRÍTICAS:
-- Base de conhecimento é VERDADE ABSOLUTA. Se não estiver lá, diga: “Vou confirmar com a equipe e te retorno.”
-- NUNCA invente preço, prazo, recurso, desconto ou resultado garantido.
-- Preserve contexto: não pergunte o que ele já respondeu. Use as informações anteriores.
-- Uma pergunta por mensagem. Máximo 350 caracteres em conversa comum.
-- Diagnóstico só deve ser oferecido depois que houver dor identificada ou pedido de ajuda.
-- Se o cliente recusar explicitamente (“não quero”, “não serve”, “não tenho interesse”, “pare de mandar”), respeite imediatamente. Não tente contornar, não envie link, não faça nova pergunta. Responda no máximo uma confirmação curta e encerre.
-- Em conversa casual, seja breve e humano. Se ainda não houve dor clara, continue diagnosticando com UMA pergunta.
-- Transição para diagnóstico quando: “Qual é o seu maior problema?” ele não responder com clareza OU quando precisar validar antes de vender.
-
-TONS APROVADOS:
-✓ Direto, amigável, confiante
-✓ Faz pergunta, aguarda, não atira tudo de uma vez
-✓ Reconhece a situação dele e oferece solução clara
-✓ Usa nome se souber, personaliza
-
-TONS PROIBIDOS:
-✗ Robô/script (e-mail corporativo)
-✗ Blocos de texto enormes
-✗ Pressão agressiva
-✗ Sem contextualização
-✗ “Deixa eu confirmar” antes de vender (se tiver na base, venda)
+SEMPRE:
+- Lembre do que a pessoa já disse (use o histórico!)
+- Responda como se estivesse conversando por WhatsApp com um amigo
+- Seja breve
+- Se não tem base de conhecimento sobre algo, diga que vai confirmar
 
 REGRA DE OURO:
-Se estiver em dúvida entre vender ou entender melhor, entenda melhor. Produto só entra depois de dor, pergunta ou permissão.`;
+Pareça humano. Pareça que você realmente quer ajudar. Esqueça que está vendendo.`;
 
 
 function normalizarTelefone(valor) {
@@ -394,16 +359,37 @@ function carregarProspectos(arquivo) {
 }
 
 async function criarMensagemProspeccao(lead, identidade = identidadeDaSessao(1)) {
-  const categoriaConsultiva = (lead.categoria || 'prestacao de servicos').toLowerCase();
   const nomeConsultivo = lead.nome ? lead.nome.split(' ')[0] : 'tudo bem';
-  const perguntasConsultivas = [
-    `voce ja perdeu cliente depois de mandar orcamento porque a pessoa sumiu?`,
-    `voce ja mandou um orcamento e o cliente simplesmente parou de responder?`,
-    `acontece de voce perder venda depois que manda o preco pro cliente?`,
-    `quando voce envia uma proposta, os clientes costumam demorar pra fechar?`
+
+  const aberturas = [
+    `Oi ${nomeConsultivo}, tudo certo?`,
+    `E aí ${nomeConsultivo}, tudo bem?`,
+    `Opa ${nomeConsultivo}, beleza?`,
+    `Fala ${nomeConsultivo}! Como vai?`
   ];
-  const perguntaConsultiva = perguntasConsultivas[Math.floor(Math.random() * perguntasConsultivas.length)];
-  return `Oi ${nomeConsultivo}, tudo bem? Aqui e ${identidade.nome}. Vi que voce trabalha com ${categoriaConsultiva} e queria entender uma coisa rapida: ${perguntaConsultiva}`;
+
+  const transicoes = [
+    `Sou ${identidade.nome} do FechaPro.`,
+    `Aqui é ${identidade.nome} da equipe FechaPro.`,
+    `Meu nome é ${identidade.nome}, falo por aqui do FechaPro.`,
+    `Opa, sou ${identidade.nome}, trabalho com vendas aqui.`
+  ];
+
+  const perguntasConsultivas = [
+    `Eu tava pensando... quando você manda uma proposta pro cliente, consegue saber se ele abriu?`,
+    `Deixa eu te perguntar uma coisa: você consegue acompanhar se os seus orçamentos são visualizados?`,
+    `Qual é seu maior problema com acompanhamento de prospecção agora?`,
+    `Quantos orçamentos você manda por mês que não viram venda?`,
+    `Você já perdeu venda por falta de um segundo contato?`,
+    `Como você sabe se precisa fazer um follow-up ou não?`,
+    `Seus clientes costumam sumir depois que você passa o orçamento?`
+  ];
+
+  const abertura = aberturas[Math.floor(Math.random() * aberturas.length)];
+  const transicao = transicoes[Math.floor(Math.random() * transicoes.length)];
+  const pergunta = perguntasConsultivas[Math.floor(Math.random() * perguntasConsultivas.length)];
+
+  return `${abertura} ${transicao} ${pergunta}`;
 }
 
 function registrarProspeccao(registro) {
@@ -714,7 +700,7 @@ function limparResposta(resposta, midia = null) {
   if (typeof resposta !== 'string') resposta = String(resposta);
 
   const ehDiagnostico = midia && ['documento', 'imagem', 'video'].includes(midia.tipo);
-  const limiteMaximo = ehDiagnostico ? 1600 : 700;
+  const limiteMaximo = ehDiagnostico ? 1600 : 900;
 
   if (resposta.length <= limiteMaximo) {
     return { resposta, truncado: false };
@@ -788,8 +774,8 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
 
       const resultado = await xai.messages.create({
         model: process.env.XAI_MODEL || 'grok-beta',
-        max_tokens: 500,
-        temperature: 0.3,
+        max_tokens: 700,
+        temperature: 0.65,
         system: systemInstruction,
         messages: mensagensXai,
       });
@@ -815,8 +801,8 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
 
       const resultado = await openai.chat.completions.create({
         model: process.env.OPENAI_MODEL || 'gpt-4o',
-        max_tokens: 500,
-        temperature: 0.3,
+        max_tokens: 700,
+        temperature: 0.65,
         messages: [
           { role: 'system', content: systemInstruction },
           ...mensagensOpenAI
@@ -844,7 +830,7 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
         contents,
         config: {
           systemInstruction,
-          temperature: 0.3,
+          temperature: 0.65,
           maxOutputTokens: 500,
           thinkingConfig: { thinkingBudget: 0 },
         },

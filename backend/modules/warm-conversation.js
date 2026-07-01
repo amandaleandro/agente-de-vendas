@@ -27,20 +27,45 @@ class WarmConversationManager {
   // Obtém uma resposta aleatória para uma pergunta
   obterResposta(pergunta) {
     if (!this.repertorio.temas || this.repertorio.temas.length === 0) {
-      return 'Tudo bem!';
+      const respostasGenericas = [
+        'Tudo bem!',
+        'Que legal!',
+        'Interessante',
+        'Bacana',
+        'Boa!'
+      ];
+      return respostasGenericas[Math.floor(Math.random() * respostasGenericas.length)];
     }
 
     for (const tema of this.repertorio.temas) {
       for (const conversa of tema.conversas) {
         // Verificar se a pergunta é similar (contém palavras-chave)
         if (this.perguntasSimilares(pergunta, conversa.pergunta)) {
-          return conversa.respostas[Math.floor(Math.random() * conversa.respostas.length)];
+          const respostas = conversa.respostas || [];
+          if (respostas.length === 0) {
+            return this.obterRespostaGenerica();
+          }
+          return respostas[Math.floor(Math.random() * respostas.length)];
         }
       }
     }
 
-    // Fallback: retornar uma resposta genérica
-    return 'Que legal! Continua...';
+    // Fallback: retornar uma resposta genérica variada
+    return this.obterRespostaGenerica();
+  }
+
+  obterRespostaGenerica() {
+    const respostas = [
+      'Que legal! Continua...',
+      'Interessante, como assim?',
+      'Ah, entendo. E daí?',
+      'Bacana, me conta mais',
+      'Opa, legal demais',
+      'Verdade, é assim mesmo',
+      'Faz total sentido',
+      'Que maneiro!'
+    ];
+    return respostas[Math.floor(Math.random() * respostas.length)];
   }
 
   perguntasSimilares(pergunta1, pergunta2) {
@@ -88,7 +113,7 @@ class WarmConversationManager {
     };
   }
 
-  proxima MensagemNaConversa(conversaId) {
+  proximaMensagemNaConversa(conversaId) {
     const conversa = this.conversasAtivas.get(conversaId);
     if (!conversa || !conversa.rodando) return null;
 
