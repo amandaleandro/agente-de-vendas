@@ -7,63 +7,78 @@ class RoteiroHeuristico {
     this.URL_DIAGNOSTICO = 'https://fechapro.com.br/diagnostico';
     this.URL_COMPRA_ANUAL = 'https://fechapro.com.br/auth/signup?plan=annual';
 
-    // Alternativas para respostas comuns
+    // Alternativas para respostas comuns (expandidas para melhor conversão)
     this.alternativasPerguntasComuns = {
       'qual_gargalo': [
         'Qual é o seu maior problema então?',
         'Me diz: qual é seu principal desafio?',
         'Qual é a sua dor principal?',
         'Qual parte mais te irrita no processo?',
-        'Qual é o seu maior obstáculo?'
+        'Qual é o seu maior obstáculo?',
+        'Tá, qual é o gargalo mesmo que mais mexe com você?',
+        'E qual é o pain point número 1 pro seu negócio?',
+        'Me fala: se você pudesse resolver UM problema agora, qual seria?',
+        'Qual é aquela coisa que te tira sono à noite?'
       ],
       'como_envia': [
         'E como você envia o orçamento hoje?',
         'Tipo de proposta que você manda, é como?',
         'Você manda como - só valor ou algo mais completo?',
-        'Qual é seu formato de proposta?'
+        'Qual é seu formato de proposta?',
+        'Você manda pelo WhatsApp, email, ou pessoalmente?',
+        'Qual é sua estratégia agora - você liga antes, manda por email?',
+        'Como você apresenta o valor pra ele - direto ou com contexto?',
+        'Faz em PDF ou envia o valor pelo chat mesmo?'
       ],
       'cliente_some': [
         'O cliente costuma sumir depois da proposta?',
         'Ele some depois que você manda ou volta com dúvidas?',
         'Fica no silêncio mesmo?',
-        'Você consegue acompanhar depois?'
+        'Você consegue acompanhar depois?',
+        'Depois que você manda, o rádio fica mudo ou ele responde?',
+        'Quanto tempo leva até o cliente responder normalmente?',
+        'Você consegue saber se o cliente abriu a proposta?',
+        'É comum ele pedir desconto ou quer mais tempo pra pensar?'
       ],
       'qual_problema': [
         'Então qual é exatamente seu problema?',
         'Qual é a principal dificuldade sua?',
         'E qual é o maior problema?',
-        'Qual sua maior dor?'
+        'Qual sua maior dor?',
+        'Resumindo: qual é o principal desafio?',
+        'Tá certo o que você tá me falando?',
+        'Eu tô certo em entender assim?',
+        'Então basicamente é isso que tá emperrando?'
+      ],
+      'objecao_preco': [
+        'Entendo. Mas pensando bem, quanto você perde por mês com esse problema?',
+        'Quanto você acha que deixa de faturar por essa deficiência?',
+        'Tá, mas qual seria o impacto se você conseguisse fechar 3 vendas a mais por mês?',
+        'Quantos "vou pensar" você escuta por mês que não viram vendas?'
+      ],
+      'objecao_tempo': [
+        'Tá, leva 1 minuto pra você ver o diagnóstico e tirar suas conclusões. Vale a pena?',
+        'Fica de olho então - mando agora e você vê quando tiver um tempinho',
+        'Coloca no seu radar pra depois. Mando o link?'
       ]
     };
 
-    // Explicações detalhadas sobre FechaPro
-    this.explicacoesFechapro = `
-📋 *Como o FechaPro funciona*
+    // Explicações detalhadas sobre FechaPro (natural, persuasiva)
+    this.explicacoesFechapro = `Olha só como funciona:
 
-*1️⃣ Você cria propostas profissionais em 1 minuto*
-- Templates prontos com sua marca
-- Preenche dados do cliente uma vez
-- Gera PDF ou link interativo
+Você cria uma proposta profissional em 1 minuto (templates prontos, é só preencher).
 
-*2️⃣ O cliente recebe pelo WhatsApp/Email*
-- Vê direto no navegador ou app
-- Assinatura digital incluída
-- Você acompanha em tempo real
+O cliente recebe pelo WhatsApp - pode ver no navegador ou assinar direto.
 
-*3️⃣ Você acompanha tudo*
-- Quem abriu a proposta
-- Quanto tempo ficou lendo
-- Se assinou ou recusou
-- Quando precisa fazer follow-up
+E aqui é a mágica: você vê TUDO. Quem abriu, quanto tempo leu, se assinou ou recusou. Você sabe exatamente quando precisa fazer follow-up.
 
-*4️⃣ Resultados*
-- Clientes fecham 3x mais rápido
-- Menos "vou pensar" e mais vendas
-- Menos tempo administrativo
+Resultado? Clientes fecham 3x mais rápido. Menos "vou pensar" e mais vendas mesmo.
 
-${this.URL_DIAGNOSTICO} ← faz um diagnóstico da sua situação atual
+Normalmente os nossos clientes veem uma melhoria de 40-60% no ciclo de venda nos primeiros 30 dias.
 
-Quer que eu explique melhor alguma parte?
+Quer fazer um teste? Aqui: ${this.URL_DIAGNOSTICO}
+
+(Leva 3 minutos e você vê exatamente o quanto você tá deixando de faturar por mês)
     `;
   }
 
@@ -130,6 +145,18 @@ Quer que eu explique melhor alguma parte?
     return resposta;
   }
 
+  ehObjecao(texto) {
+    const palavrasObjecao = ['caro', 'custa muito', 'precio', 'valor', 'não tenho tempo', 'ocupado', 'depois', 'pensa', 'acho que não', 'não serve', 'já temos', 'tenho outro', 'preciso pensar'];
+    const textoLower = texto.toLowerCase();
+    return palavrasObjecao.some(p => textoLower.includes(p));
+  }
+
+  ehDesinteresse(texto) {
+    const palavrasDesinteresse = ['não quero', 'não serve', 'não preciso', 'para aqui', 'sai', 'saiiiir', 'bloquear', 'remover lista', 'não mais', 'chega'];
+    const textoLower = texto.toLowerCase();
+    return palavrasDesinteresse.some(p => textoLower.includes(p));
+  }
+
   async gerarResposta(texto, telefone, identidade = { nome: 'Amanda' }, historicMensagens = []) {
     const etapaAtual = this.etapasPorContato.get(telefone) || 'apresentacao';
     const analise = await nlpLocal.processar(texto);
@@ -140,21 +167,42 @@ Quer que eu explique melhor alguma parte?
       intencao = 'desconhecido';
     }
 
+    // Sempre respeitar desinteresse explícito
+    if (this.ehDesinteresse(texto)) {
+      this.etapasPorContato.set(telefone, 'encerrado');
+      return 'Tudo bem! Sem problema. Qualquer coisa, só chamar. Abraço!';
+    }
+
     if (intencao === 'desinteresse') {
       this.etapasPorContato.set(telefone, 'encerrado');
-      return 'Tranquilo, sem problema. Qualquer coisa é só me chamar 👍';
+      return 'Tranquilo, sem problema. Qualquer coisa é só me chamar!';
     }
 
     if (etapaAtual === 'encerrado') {
       return 'Sem problema!';
     }
 
+    // Handling de objeção
+    if (this.ehObjecao(texto) && etapaAtual === 'perguntou_produto') {
+      this.etapasPorContato.set(telefone, 'objecao');
+
+      if (texto.toLowerCase().includes('caro') || texto.toLowerCase().includes('custa')) {
+        const alt = this.obterAlternativaQuandoRepetida(telefone, 'objecao_preco');
+        return alt || 'Entendo. Mas quantas vendas você tá deixando de fazer por mês? Porque geralmente o prejuízo é bem maior que o investimento.';
+      }
+
+      if (texto.toLowerCase().includes('tempo') || texto.toLowerCase().includes('ocupado')) {
+        const alt = this.obterAlternativaQuandoRepetida(telefone, 'objecao_tempo');
+        return alt || 'Tá, nesse caso só gasta 3 minutos pra você tirar suas conclusões. Mando o link e você vê quando tiver um tempinho?';
+      }
+    }
+
     if (intencao === 'negatividade') {
-      return 'Opa, peço desculpas. Deixa eu ser direto: qual é mesmo seu maior gargalo - é o cliente não responder depois da proposta ou outro problema?';
+      return 'Opa, entendo. Deixa eu ser direto: qual é mesmo seu maior gargalo - é o cliente não responder depois da proposta ou outro problema?';
     }
 
     if (intencao === 'teste_bot') {
-      return 'Boa! Sim, sou assistente aqui mesmo. Tô tentando entender como funciona seu negócio. Depois que você manda um orçamento, o cliente costuma sumir ou volta com dúvidas?';
+      return 'Boa! Sim, sou assistente. Tô tentando entender seu negócio. Depois que você manda um orçamento, o cliente costuma sumir ou volta com dúvidas?';
     }
 
     // Verificar se já perguntou algo parecido no histórico
@@ -197,23 +245,34 @@ Quer que eu explique melhor alguma parte?
       let resposta = '';
 
       if (intencao === 'saudacao') {
-        resposta = `Oi! Aqui é ${identidade.nome}. Então me conta uma coisa: depois que você manda um orçamento, o cliente costuma sumir ou volta com dúvidas?`;
+        const opcoes = [
+          `Opa! Aqui é ${identidade.nome}. Deixa eu te perguntar algo rápido: depois que você manda uma proposta, o cliente costuma sumir ou volta com dúvidas?`,
+          `E aí! Sou ${identidade.nome}. Qual é seu maior problema no momento - é captar cliente, fazer proposta ou fechar a venda mesmo?`,
+          `Oi! Sou ${identidade.nome}. Rápido: o cliente costuma demorar pra responder depois do orçamento?`
+        ];
+        resposta = opcoes[Math.floor(Math.random() * opcoes.length)];
       } else if (['afirmacao_positiva', 'dor_some', 'dor_desconto'].includes(intencao)) {
         this.etapasPorContato.set(telefone, 'dor');
 
         if (intencao === 'afirmacao_positiva') {
-          if (jaFezPerguntaSobreOrcamento) {
-            resposta = 'Pois é, isso é bem comum mesmo. Então basicamente você manda a proposta e fica no vácuo. É sempre assim ou tem clientes que voltam?';
-          } else {
-            resposta = 'Então esse é mesmo o seu principal desafio?';
-          }
+          const opcoes = [
+            'Pois é, isso é super comum. Você manda a proposta e fica no vácuo. Aí qual que é - o cliente não vê valor ou não consegue entrar em contato depois?',
+            'Tá, então o cliente desaparece depois da proposta. É sempre assim ou tem alguns que voltam?',
+            'Entendo. Qual é a maior dificuldade - fazer o cliente entender o valor ou fazer ele responder depois?'
+          ];
+          resposta = opcoes[Math.floor(Math.random() * opcoes.length)];
         } else {
-          resposta = 'Isso geralmente passa por dois problemas: o cliente não vê o valor, ou falta um acompanhamento certo. Qual você sente mais?';
+          const opcoes = [
+            'Isso é problema de duas coisas: ou o cliente não vê valor, ou falta follow-up certo. Qual você sente mais?',
+            'Tá, então basicamente é falta de acompanhamento? Você consegue saber se o cliente abriu a proposta?',
+            'Então o cliente desiste por preço ou por falta de retorno mesmo?'
+          ];
+          resposta = opcoes[Math.floor(Math.random() * opcoes.length)];
         }
       } else if (jaFezPerguntaSobreOrcamento) {
-        resposta = 'Tá, então qual é o seu maior desafio mesmo - captar cliente, montar uma proposta melhor, ou fazer o cliente responder?';
+        resposta = 'Tá. Qual é a principal barreira - captar, fazer proposta, ou fechar?';
       } else {
-        resposta = 'Então me diz: qual é o seu gargalo mesmo? É o cliente sumir, o preço ficar caro, ou é outra coisa?';
+        resposta = 'Qual é seu maior problema agora - é o cliente não responder, achar caro, ou outra coisa?';
       }
 
       if (this.ehRespostaRepetida(telefone, resposta)) {
@@ -263,10 +322,18 @@ Quer que eu explique melhor alguma parte?
     if (etapaAtual === 'permissao_produto') {
       if (['afirmacao_positiva', 'duvida_produto', 'preco', 'urgencia'].includes(intencao)) {
         this.etapasPorContato.set(telefone, 'perguntou_produto');
-        const resposta = `O FechaPro basicamente te ajuda a criar propostas profissionais e acompanhar o cliente depois. Deixa eu te mandar um diagnóstico rápido? ${this.URL_DIAGNOSTICO}`;
+
+        const opcoes = [
+          `Ótimo! O FechaPro é bem simples: você cria propostas em 1 minuto e acompanha quem abriu, quanto leu, se assinou. Quer fazer um teste rápido? ${this.URL_DIAGNOSTICO}`,
+          `Perfeito. Basicamente a gente te mostra como você tá deixando de faturar por mês. Aqui tem um diagnóstico rápido (3 min): ${this.URL_DIAGNOSTICO}`,
+          `Show! O sistema cria propostas profissionais e te mostra TUDO que o cliente faz com elas. Quer ver como fica pra você? ${this.URL_DIAGNOSTICO}`,
+          `Excelente! Deixa eu te mostrar na prática. Aqui você vê o impacto pra seu negócio: ${this.URL_DIAGNOSTICO}`
+        ];
+
+        const resposta = opcoes[Math.floor(Math.random() * opcoes.length)];
 
         if (this.ehRespostaRepetida(telefone, resposta)) {
-          const alt = `Deixa eu mandar um diagnóstico pra você: ${this.URL_DIAGNOSTICO}`;
+          const alt = `Manda um diagnóstico aqui? Gasta 3 minutos e você vê o potencial: ${this.URL_DIAGNOSTICO}`;
           this.registrarResposta(telefone, alt);
           return alt;
         }
@@ -275,7 +342,14 @@ Quer que eu explique melhor alguma parte?
         return resposta;
       }
 
-      const respostaPadrao = 'Tá bom. O que você sente que mais compromete suas vendas?';
+      const opcoes = [
+        'Tá bom. O que você sente que mais compromete suas vendas?',
+        'Entendo. Qual é então a maior dor - é vender ou acompanhar depois?',
+        'Tudo certo. Me diz: qual seria o impacto se você conseguisse fechar 3 vendas a mais por mês?'
+      ];
+
+      const respostaPadrao = opcoes[Math.floor(Math.random() * opcoes.length)];
+
       if (this.ehRespostaRepetida(telefone, respostaPadrao)) {
         const alt = this.obterAlternativaQuandoRepetida(telefone, 'qual_gargalo');
         if (alt) return alt;
@@ -285,15 +359,17 @@ Quer que eu explique melhor alguma parte?
       return respostaPadrao;
     }
 
+    // Resposta padrão quando não consegue classificar
     let resposta = 'Qual parte da venda mais emperrada pra você - é a proposta, o preço, ou o cliente não voltar depois?';
 
-    // Check if response is repeated
-    if (this.ehRespetaRepetida(telefone, resposta)) {
+    if (this.ehRespostaRepetida(telefone, resposta)) {
       const alternativas = [
         'Mas me diz então: qual é seu principal problema?',
         'Então qual é a principal dificuldade sua?',
         'E aí, qual seu maior desafio?',
-        'Me fala então: qual é mesmo seu gargalo?'
+        'Me fala então: qual é mesmo seu gargalo?',
+        'Qual é o número 1 na sua lista de problemas?',
+        'Se você pudesse resolver UMA coisa agora, qual seria?'
       ];
       resposta = alternativas[Math.floor(Math.random() * alternativas.length)];
     }
