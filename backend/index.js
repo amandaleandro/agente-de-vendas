@@ -110,6 +110,8 @@ global.optOutContatos = optOutContatos;
 let bancoIndisponivelAte = 0;
 let baseConhecimento = '';
 let prospeccaoIniciada = false;
+let quotaEmDanger = false; // Flag para economizar tokens quando quota está baixa
+let ultimoErroQuota = 0; // Timestamp do último erro de quota
 const warmup = new WarmupManager();
 global.warmupManager = warmup; // Exportar para APIs
 const warmConversation = new WarmConversationManager();
@@ -722,6 +724,26 @@ function limparResposta(resposta, midia = null) {
 }
 
 async function gerarResposta(texto, telefone, midia = null, identidade = identidadeDaSessao(1), tentativa = 0, diagnosticoContexto = null, iaForcada = null) {
+  // Se quota em perigo, ir direto para fallback para economizar tokens
+  if (quotaEmDanger && Date.now() - ultimoErroQuota < 3600000) { // 1 hora em modo economia
+    console.log(`💰 Modo economia de tokens ativo. Usando roteiro direto...`);
+    const chaveHistorico = `${identidade.sessao}:${telefone}`;
+    const historico = historicosPorContato.get(chaveHistorico) || [];
+    const historicoMensagensParaRoteiro = historico.map(msg => ({
+      fromMe: msg.role === 'model',
+      text: msg.parts?.[0]?.text || '',
+      timestamp: Date.now()
+    }));
+    try {
+      const respostaRoteiro = await gerarRespostaRoteiro(texto, telefone, identidade, historicoMensagensParaRoteiro);
+      if (respostaRoteiro && respostaRoteiro.trim().length > 0) {
+        return respostaRoteiro;
+      }
+    } catch (e) {
+      console.warn('Roteiro fallou também, continuando com IA...');
+    }
+  }
+
   // Lógica de alternância automática entre IAs
   let iaUsando = iaForcada || iaProvider;
 
@@ -761,6 +783,7 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
 
   try {
     let resposta = '';
+    const maxTokensAjustado = quotaEmDanger ? 300 : 700; // Reduz tokens em modo economia
 
     if (iaUsando === 'xai') {
       const mensagensXai = historico.map(msg => ({
@@ -774,7 +797,7 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
 
       const resultado = await xai.messages.create({
         model: process.env.XAI_MODEL || 'grok-beta',
-        max_tokens: 700,
+        max_tokens: maxTokensAjustado,
         temperature: 0.65,
         system: systemInstruction,
         messages: mensagensXai,
@@ -801,7 +824,7 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
 
       const resultado = await openai.chat.completions.create({
         model: process.env.OPENAI_MODEL || 'gpt-4o',
-        max_tokens: 700,
+        max_tokens: maxTokensAjustado,
         temperature: 0.65,
         messages: [
           { role: 'system', content: systemInstruction },
@@ -831,7 +854,7 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
         config: {
           systemInstruction,
           temperature: 0.65,
-          maxOutputTokens: 500,
+          maxOutputTokens: maxTokensAjustado,
           thinkingConfig: { thinkingBudget: 0 },
         },
       });
@@ -859,7 +882,14 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
     return respostaLimpa;
   } catch (err) {
     const iaNome = iaUsando === 'xai' ? 'xAI' : 'Gemini';
-    const ehQuotaExceeded = err.message?.includes('429') || err.message?.includes('RESOURCE_EXHAUSTED') || err.message?.includes('quota') || err.message?.includes('rate limit');
+    const ehQuotaExceeded = err.message?.includes('429') || err.message?.includes('RESOURCE_EXHAUSTED') || err.message?.includes('quota') || err.message?.includes('rate limit') || err.message?.includes('429');
+
+    // Se erro de quota, marca que estamos em perigo
+    if (ehQuotaExceeded) {
+      quotaEmDanger = true;
+      ultimoErroQuota = Date.now();
+      console.log(`⚠️⚠️⚠️ QUOTA EM PERIGO! ${iaNome} reportou erro de limite. Usando fallback...`);
+    }
 
     // Estratégia de fallback em cascata:
     // 1. Se Gemini falhar com quota → tenta XAI (tentativa 1)
@@ -904,15 +934,31 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
       timestamp: Date.now()
     }));
 
-    const respostaFallback = await gerarRespostaRoteiro(texto, telefone, identidade, historicoMensagensParaRoteiro);
-    const { resposta: respostaFallbackLimpa, truncado: truncadoFallback } = limparResposta(respostaFallback, midia);
-    metrics.registrarRespostaIA({ telefone, tamanho: respostaFallbackLimpa.length, fonte: 'roteiro', truncado: truncadoFallback });
-    historicosPorContato.set(chaveHistorico, [
-      ...historico,
-      { role: 'user', parts: [{ text: texto }] },
-      { role: 'model', parts: [{ text: respostaFallbackLimpa }] },
-    ].slice(-MAX_HISTORICO_POR_CONTATO));
-    return respostaFallbackLimpa;
+    try {
+      const respostaFallback = await gerarRespostaRoteiro(texto, telefone, identidade, historicoMensagensParaRoteiro);
+      if (!respostaFallback || respostaFallback.trim().length === 0) {
+        throw new Error('Roteiro retornou resposta vazia');
+      }
+      const { resposta: respostaFallbackLimpa, truncado: truncadoFallback } = limparResposta(respostaFallback, midia);
+      metrics.registrarRespostaIA({ telefone, tamanho: respostaFallbackLimpa.length, fonte: 'roteiro', truncado: truncadoFallback });
+      historicosPorContato.set(chaveHistorico, [
+        ...historico,
+        { role: 'user', parts: [{ text: texto }] },
+        { role: 'model', parts: [{ text: respostaFallbackLimpa }] },
+      ].slice(-MAX_HISTORICO_POR_CONTATO));
+      console.log(`✅ Fallback (Roteiro) acionado com sucesso para ${telefone}`);
+      return respostaFallbackLimpa;
+    } catch (errRoteiro) {
+      console.error(`❌ Roteiro também falhou: ${errRoteiro.message}`);
+      // Último recurso: resposta genérica que sempre funciona
+      const respostaUltimaOpcao = 'Opa, tô com um pequeno problema técnico agora. Me manda novamente sua pergunta em um momento que vou conseguir responder melhor!';
+      historicosPorContato.set(chaveHistorico, [
+        ...historico,
+        { role: 'user', parts: [{ text: texto }] },
+        { role: 'model', parts: [{ text: respostaUltimaOpcao }] },
+      ].slice(-MAX_HISTORICO_POR_CONTATO));
+      return respostaUltimaOpcao;
+    }
   }
 }
 
