@@ -738,6 +738,123 @@ const server = http.createServer((req, res) => {
         }
       }
 
+      // ============ TRAINING APIS ============
+
+      if (url === '/api/training/metrics' && req.method === 'GET') {
+        try {
+          if (!global.trainerService) {
+            return json(500, { error: 'TrainerService não inicializado' });
+          }
+
+          const metricas = global.trainerService.obterMetricas();
+          return json(200, { sucesso: true, dados: metricas });
+        } catch (e) {
+          return json(500, { erro: e.message });
+        }
+      }
+
+      if (url === '/api/training/results' && req.method === 'GET') {
+        try {
+          if (!global.trainerService) {
+            return json(500, { error: 'TrainerService não inicializado' });
+          }
+
+          const resultados = global.trainerService.obterUltimosResultados();
+          if (!resultados) {
+            return json(404, { sucesso: false, erro: 'Nenhum treinamento realizado ainda' });
+          }
+
+          return json(200, {
+            sucesso: true,
+            dados: {
+              timestamp: resultados.timestamp,
+              taxaConversao: resultados.analise?.conversaoRate,
+              totalConversas: resultados.analise?.total,
+              vendidas: resultados.analise?.conversasQueConverteram?.length,
+              padroesPrincipais: resultados.padroes ?
+                Object.entries(resultados.padroes)
+                  .slice(0, 10)
+                  .map(([palavra, stats]) => ({
+                    palavra,
+                    frequencia: stats.count,
+                    conversoes: stats.conversoes,
+                    taxaConversao: ((stats.conversoes / stats.count) * 100).toFixed(0) + '%'
+                  }))
+                : []
+            }
+          });
+        } catch (e) {
+          return json(500, { erro: e.message });
+        }
+      }
+
+      if (url === '/api/training/start' && req.method === 'POST') {
+        try {
+          if (!global.trainerService) {
+            return json(500, { error: 'TrainerService não inicializado' });
+          }
+
+          global.trainerService.treinar().catch(err => {
+            console.error('Erro no treinamento manual:', err);
+          });
+
+          return json(200, { sucesso: true, mensagem: 'Treinamento iniciado' });
+        } catch (e) {
+          return json(500, { erro: e.message });
+        }
+      }
+
+      if (url === '/api/training/status' && req.method === 'GET') {
+        try {
+          if (!global.trainerService) {
+            return json(500, { error: 'TrainerService não inicializado' });
+          }
+
+          const metricas = global.trainerService.obterMetricas();
+          const resultados = global.trainerService.obterUltimosResultados();
+
+          return json(200, {
+            sucesso: true,
+            status: {
+              ativo: metricas.ativo,
+              emExecucao: metricas.emExecucao,
+              ultimoTreinamento: metricas.ultimoTreinamento,
+              totalTreinamentos: metricas.totalTreinamentos,
+              taxaConversaoMedia: metricas.taxaConversaoMedia,
+              proximos5Padroes: metricas.padroesPrincipais,
+              temUltimosResultados: !!resultados
+            }
+          });
+        } catch (e) {
+          return json(500, { erro: e.message });
+        }
+      }
+
+      if (url === '/api/training/insights' && req.method === 'GET') {
+        try {
+          if (!global.trainerService) {
+            return json(500, { error: 'TrainerService não inicializado' });
+          }
+
+          const resultados = global.trainerService.obterUltimosResultados();
+          if (!resultados || !resultados.insights) {
+            return json(404, { sucesso: false, erro: 'Nenhum insight disponível ainda' });
+          }
+
+          return json(200, {
+            sucesso: true,
+            dados: {
+              timestamp: resultados.timestamp,
+              padroesDeSucesso: resultados.insights.padroesDeSucesso,
+              recomendacoes: resultados.insights.recomendacoes,
+              exemplosQueVenderam: resultados.insights.conversasQueVenderam.slice(0, 5)
+            }
+          });
+        } catch (e) {
+          return json(500, { erro: e.message });
+        }
+      }
+
       // Fallback for missing APIs
       return json(404, { error: 'Endpoint não encontrado' });
     }

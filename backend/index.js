@@ -30,6 +30,7 @@ const DiagnosticoPrompt = require('./modules/diagnostico-prompt');
 const ProspeccaoHistorico = require('./modules/prospeccao-historico');
 const ProspeccaoAgenda = require('./modules/prospeccao-agenda');
 const APIPerspeccao = require('./modules/api-prospeccao');
+const TrainerService = require('./modules/trainer-service');
 // Inicializa variáveis de ambiente primeiro com OVERRIDE
 // Isso garante que se o usuário mudar a configuração pelo painel UI (.env local), ela vença as variáveis estáticas do Docker
 require('dotenv').config({ path: require('path').join(__dirname, 'config', '.env'), override: true });
@@ -1757,6 +1758,12 @@ async function iniciar() {
 
   // Inicializar health check
   healthCheck = new HealthCheck(pool);
+
+  // Iniciar sistema de treinamento
+  const trainerService = new TrainerService(pool);
+  const intervaloTreinamento = parseInt(process.env.TRAINING_INTERVAL_MIN || '120'); // 2 horas
+  trainerService.iniciar(intervaloTreinamento);
+  global.trainerService = trainerService; // Exportar para APIs
 
   // Iniciar todos os serviços de manutenção
   // Frontend é servido por painel-simples.js na porta 3099
