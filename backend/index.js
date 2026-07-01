@@ -31,6 +31,8 @@ const ProspeccaoHistorico = require('./modules/prospeccao-historico');
 const ProspeccaoAgenda = require('./modules/prospeccao-agenda');
 const APIPerspeccao = require('./modules/api-prospeccao');
 const TrainerService = require('./modules/trainer-service');
+const LeadScorer = require('./modules/lead-scorer');
+const FollowupScheduler = require('./modules/followup-scheduler');
 // Inicializa variáveis de ambiente primeiro com OVERRIDE
 // Isso garante que se o usuário mudar a configuração pelo painel UI (.env local), ela vença as variáveis estáticas do Docker
 require('dotenv').config({ path: require('path').join(__dirname, 'config', '.env'), override: true });
@@ -1764,6 +1766,16 @@ async function iniciar() {
   const intervaloTreinamento = parseInt(process.env.TRAINING_INTERVAL_MIN || '120'); // 2 horas
   trainerService.iniciar(intervaloTreinamento);
   global.trainerService = trainerService; // Exportar para APIs
+
+  // Iniciar sistema de scoring de leads
+  const leadScorer = new LeadScorer();
+  global.leadScorer = leadScorer;
+  logger.info('🎯 LeadScorer inicializado');
+
+  // Iniciar sistema de follow-up automático
+  const followupScheduler = new FollowupScheduler(pool);
+  global.followupScheduler = followupScheduler;
+  logger.info('📞 FollowupScheduler inicializado');
 
   // Iniciar todos os serviços de manutenção
   // Frontend é servido por painel-simples.js na porta 3099
