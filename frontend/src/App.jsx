@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare, Flame, Brain } from 'lucide-react';
+import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare, Flame, Brain, TrendingUp, Shield, Activity } from 'lucide-react';
 
 import Dashboard from './pages/Dashboard';
 import Conexao from './pages/Conexao';
@@ -13,6 +13,9 @@ import Warmup from './pages/Warmup';
 import LearningDashboard from './components/LearningDashboard';
 import LearningConfig from './pages/LearningConfig';
 import KnowledgeBase from './pages/KnowledgeBase';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
+import BackupManager from './pages/BackupManager';
+import SystemMonitor from './pages/SystemMonitor';
 
 function App() {
   return (
@@ -29,6 +32,9 @@ function App() {
             </NavLink>
             <NavLink to="/analytics" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <BarChart2 size={20} /> Analytics
+            </NavLink>
+            <NavLink to="/analytics-dashboard" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <TrendingUp size={20} /> Dashboard Premium
             </NavLink>
             <NavLink to="/conexao" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Smartphone size={20} /> Conexão WhatsApp
@@ -57,6 +63,12 @@ function App() {
             <NavLink to="/logs" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Terminal size={20} /> Terminal de Logs
             </NavLink>
+            <NavLink to="/backup" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Shield size={20} /> Backups
+            </NavLink>
+            <NavLink to="/monitor" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Activity size={20} /> Monitor Sistema
+            </NavLink>
           </div>
         </nav>
         
@@ -65,6 +77,7 @@ function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/analytics" element={<Analytics />} />
+            <Route path="/analytics-dashboard" element={<AnalyticsDashboard />} />
             <Route path="/conexao" element={<Conexao />} />
             <Route path="/prospeccao" element={<Prospeccao />} />
             <Route path="/conversas" element={<Conversas />} />
@@ -74,6 +87,8 @@ function App() {
             <Route path="/knowledge-base" element={<KnowledgeBase />} />
             <Route path="/configuracao" element={<Configuracao />} />
             <Route path="/logs" element={<TerminalLogs />} />
+            <Route path="/backup" element={<BackupManager />} />
+            <Route path="/monitor" element={<SystemMonitor />} />
           </Routes>
         </main>
       </div>

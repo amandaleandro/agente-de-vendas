@@ -58,21 +58,31 @@ class APIPerspeccao {
       await new Promise(resolve => setTimeout(resolve, 500));
 
       if (uploadedFiles.length === 0) {
+        console.error('❌ Nenhum arquivo CSV encontrado no upload');
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Nenhum arquivo CSV enviado' }));
         return;
       }
 
+      console.log(`✅ Upload recebido: ${uploadedFiles.join(', ')}`);
+
       // Criar fila com as novas planilhas
       const planilhas = this.agenda.carregarPlanilhas();
+      console.log(`📊 ${planilhas.length} planilhas carregadas do disco`);
+
       this.agenda.criarFila(planilhas);
+      console.log(`🎯 Fila criada com ${this.agenda.fila.length} planilhas`);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
+      const totalContatos = this.agenda.fila.reduce((sum, p) => sum + p.contatos_totais, 0);
       res.end(JSON.stringify({
         success: true,
         message: `${uploadedFiles.length} arquivo(s) enviado(s) com sucesso`,
         files: uploadedFiles,
-        total_na_fila: this.agenda.fila.length
+        planilhas_carregadas: this.agenda.fila.length,
+        total_na_fila: this.agenda.fila.length,
+        total_contatos: totalContatos,
+        fila_detalhe: this.agenda.fila.map(p => ({ nome: p.nome, contatos: p.contatos_totais }))
       }));
     } catch (err) {
       console.error('❌ Erro no upload:', err);
@@ -173,24 +183,34 @@ class APIPerspeccao {
   handleLista(res) {
     try {
       let contatos = [];
+      let fonte = 'nenhuma';
+
       if (this.agenda.planilhaAtual && this.agenda.planilhaAtual.contatos) {
         contatos = this.agenda.planilhaAtual.contatos;
+        fonte = 'planilhaAtual';
+        console.log(`📝 Lista: usando planilhaAtual (${contatos.length} contatos)`);
       } else if (this.agenda.fila.length > 0 && this.agenda.fila[0].contatos) {
         contatos = this.agenda.fila[0].contatos;
+        fonte = 'fila[0]';
+        console.log(`📝 Lista: usando fila[0] - ${this.agenda.fila[0].nome} (${contatos.length} contatos)`);
+      } else {
+        console.warn(`⚠️  Lista: nenhuma planilha disponível. planilhaAtual=${!!this.agenda.planilhaAtual}, fila.length=${this.agenda.fila.length}`);
       }
-      
+
       // Filtrar contatos já prospectados para que saiam da fila visual
       if (global.prospeccaoHistorico && contatos.length > 0) {
+        const contatosAntes = contatos.length;
         contatos = contatos.filter(contato => {
           const rawNum = contato.numero || contato.telefone || contato['telefone/whatsapp'] || contato['whatsapp'] || contato['celular'] || contato[0] || '';
           let numero = String(rawNum).replace(/\D/g, '');
           if (numero.length === 10 || numero.length === 11) numero = `55${numero}`;
           return !global.prospeccaoHistorico.historicoEmMemoria.has(numero) && !global.prospeccaoHistorico.errosEmMemoria.has(numero);
         });
+        console.log(`🔍 Filtrados: ${contatosAntes} → ${contatos.length} contatos (${contatosAntes - contatos.length} já prospectados)`);
       }
-      
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, contatos }));
+      res.end(JSON.stringify({ success: true, contatos, debug: { fonte, total: contatos.length } }));
     } catch (err) {
       console.error('❌ Erro ao buscar lista de contatos:', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -243,6 +263,11 @@ class APIPerspeccao {
           empresa: dados.empresa,
           categoria: dados.categoria
         }));
+
+        console.log(`\n📊 Erros de prospectação: ${erros.length} registrados`);
+        erros.slice(0, 5).forEach(e => {
+          console.log(`   ❌ ${e.telefone} - ${e.erro} (${e.nome || '-'})`);
+        });
       }
 
       erros.sort((a, b) => new Date(b.erro_em) - new Date(a.erro_em));

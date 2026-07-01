@@ -1,4 +1,5 @@
 const nlpLocal = require('./nlp-local');
+const learningManager = require('./learning-manager');
 
 class RoteiroHeuristico {
   constructor() {
@@ -158,7 +159,12 @@ Quer fazer um teste? Aqui: ${this.URL_DIAGNOSTICO}
   }
 
   async gerarResposta(texto, telefone, identidade = { nome: 'Amanda' }, historicMensagens = []) {
+    // Registrar início da conversa se for primeira mensagem
     const etapaAtual = this.etapasPorContato.get(telefone) || 'apresentacao';
+    if (etapaAtual === 'apresentacao') {
+      learningManager.registrarInicio(telefone, identidade);
+    }
+
     const analise = await nlpLocal.processar(texto);
     let intencao = analise.intencao;
     const confianca = analise.score;
@@ -170,12 +176,16 @@ Quer fazer um teste? Aqui: ${this.URL_DIAGNOSTICO}
     // Sempre respeitar desinteresse explícito
     if (this.ehDesinteresse(texto)) {
       this.etapasPorContato.set(telefone, 'encerrado');
-      return 'Tudo bem! Sem problema. Qualquer coisa, só chamar. Abraço!';
+      const resposta = 'Tudo bem! Sem problema. Qualquer coisa, só chamar. Abraço!';
+      learningManager.registrarResultado(telefone, 'fracasso', 'desinteresse_explicito');
+      return resposta;
     }
 
     if (intencao === 'desinteresse') {
       this.etapasPorContato.set(telefone, 'encerrado');
-      return 'Tranquilo, sem problema. Qualquer coisa é só me chamar!';
+      const resposta = 'Tranquilo, sem problema. Qualquer coisa é só me chamar!';
+      learningManager.registrarResultado(telefone, 'fracasso', 'desinteresse_detectado');
+      return resposta;
     }
 
     if (etapaAtual === 'encerrado') {
@@ -375,7 +385,35 @@ Quer fazer um teste? Aqui: ${this.URL_DIAGNOSTICO}
     }
 
     this.registrarResposta(telefone, resposta);
+
+    // Registrar interação para aprendizado
+    learningManager.registrarInteracao(
+      telefone,
+      texto,
+      intencao,
+      resposta,
+      this.etapasPorContato.get(telefone) || 'apresentacao'
+    );
+
     return resposta;
+  }
+  // Métodos para gerenciar sucesso/fracasso da conversa
+  registrarSucesso(telefone, motivo = 'cliente_clicou_link') {
+    learningManager.registrarResultado(telefone, 'sucesso', motivo);
+    this.etapasPorContato.delete(telefone);
+    this.ultimasRespostasPorContato.delete(telefone);
+  }
+
+  registrarFracasso(telefone, motivo = 'timeout') {
+    learningManager.registrarResultado(telefone, 'fracasso', motivo);
+    this.etapasPorContato.delete(telefone);
+    this.ultimasRespostasPorContato.delete(telefone);
+  }
+
+  registrarIndeciso(telefone, motivo = 'sem_resposta') {
+    learningManager.registrarResultado(telefone, 'indeciso', motivo);
+    this.etapasPorContato.delete(telefone);
+    this.ultimasRespostasPorContato.delete(telefone);
   }
 }
 

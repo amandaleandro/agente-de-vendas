@@ -10,6 +10,8 @@ const alertSystem = require('./alert-system');
 const responseSelector = require('./response-selector');
 const slackNotifications = require('./slack-notifications');
 const knowledgeBase = require('./knowledge-base');
+const backupManager = require('./backup-manager');
+const monitorSystem = require('./monitor-system');
 
 const PORT = 3099;
 
@@ -1163,6 +1165,98 @@ const server = http.createServer((req, res) => {
         } catch (err) {
           return json(500, { erro: err.message });
         }
+      }
+
+      // ===== BACKUP ENDPOINTS =====
+      if (url === '/api/backup/status') {
+        const status = backupManager.obterStatusBackup();
+        return json(200, status);
+      }
+
+      if (url === '/api/backup/historico') {
+        const historico = backupManager.obterHistoricoBackups();
+        return json(200, { backups: historico });
+      }
+
+      if (url === '/api/backup/espaco') {
+        const espaco = backupManager.obterEspacoDisco();
+        return json(200, espaco);
+      }
+
+      if (req.method === 'POST' && url === '/api/backup/executar') {
+        (async () => {
+          try {
+            const resultado = await backupManager.executarBackup();
+            if (resultado) {
+              return json(200, { sucesso: true, backup: resultado });
+            } else {
+              return json(500, { sucesso: false, erro: 'Falha ao executar backup' });
+            }
+          } catch (err) {
+            return json(500, { sucesso: false, erro: err.message });
+          }
+        })();
+      }
+
+      if (req.method === 'POST' && url.startsWith('/api/backup/restaurar/')) {
+        const nomeBackup = url.split('/').pop();
+        (async () => {
+          try {
+            const resultado = await backupManager.restaurarBackup(nomeBackup);
+            return json(resultado.sucesso ? 200 : 400, resultado);
+          } catch (err) {
+            return json(500, { sucesso: false, erro: err.message });
+          }
+        })();
+      }
+
+      // ===== MONITOR ENDPOINTS =====
+      if (url === '/api/monitor/status') {
+        const status = monitorSystem.obterStatus();
+        return json(200, status);
+      }
+
+      if (url === '/api/monitor/saude') {
+        (async () => {
+          try {
+            const metricas = await monitorSystem.verificarSaude();
+            return json(200, metricas);
+          } catch (err) {
+            return json(500, { erro: err.message });
+          }
+        })();
+      }
+
+      if (url === '/api/monitor/alertas') {
+        const alertas = monitorSystem.obterAlertas();
+        return json(200, alertas);
+      }
+
+      if (url === '/api/monitor/historico') {
+        const queryString = url.split('?')[1] || '';
+        const params = new URLSearchParams(queryString);
+        const horas = parseInt(params.get('horas') || '24');
+        const historico = monitorSystem.obterHistorico(horas);
+        return json(200, { historico, periodo: `${horas}h` });
+      }
+
+      if (url === '/api/monitor/relatorio') {
+        const relatorio = monitorSystem.gerarRelatorioSaude();
+        return json(200, relatorio);
+      }
+
+      if (req.method === 'POST' && url === '/api/monitor/limites') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const limites = JSON.parse(body);
+            monitorSystem.configurarLimites(limites);
+            return json(200, { sucesso: true, limites: monitorSystem.obterStatus().alertas.limites });
+          } catch (err) {
+            return json(400, { erro: err.message });
+          }
+        });
       }
 
       // Fallback for missing APIs

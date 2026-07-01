@@ -8,7 +8,8 @@ const mammoth = require('mammoth');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const backupManager = require('./modules/backup');
+const backupScheduler = require('./modules/backup-scheduler');
+const monitorScheduler = require('./modules/monitor-scheduler');
 const webserver = require('./modules/webserver');
 const chatStore = require('./modules/chat-store'); // Armazena conversas no painel
 const crossWarmupManager = require('./modules/cross-warmup');
@@ -22,7 +23,7 @@ const SecurityManager = require('./modules/security');
 const { lerCsv } = require('./modules/csv');
 const logger = require('./modules/logger');
 const HealthCheck = require('./modules/healthcheck');
-const backup = require('./modules/backup');
+const backupManager = require('./modules/backup-manager');
 const CacheManager = require('./modules/cache');
 const ratelimiter = require('./modules/ratelimit');
 const DiagnosticoManager = require('./modules/diagnostico-manager');
@@ -1192,7 +1193,7 @@ async function conectar(sessao = 1) {
     logger: pino({ level: 'silent' }),
     // Melhorar estabilidade de conexão
     defaultQueryTimeoutMs: 60000,
-    shouldSyncHistoryMessage: false,
+    shouldSyncHistoryMessage: () => false,
     syncFullHistory: false,
     retryRequestDelayMs: 100,
   });
@@ -1709,12 +1710,11 @@ function iniciarHealthCheck() {
 }
 
 function iniciarBackupAutomatico() {
-  setInterval(() => {
-    backup.gerarBackup();
-  }, INTERVALO_BACKUP_MS);
+  // Usar scheduler de backup automático (2:00 AM diariamente)
+  const horarioBackup = process.env.BACKUP_SCHEDULE_CRON || '0 2 * * *';
+  backupScheduler.iniciar(horarioBackup);
 
-  // Fazer backup na inicialização
-  setTimeout(() => backup.gerarBackup(), 5000);
+  console.log('✅ Scheduler de backup automático iniciado');
 }
 
 function iniciarProspeccaoAgendada() {
@@ -1805,6 +1805,7 @@ async function iniciar() {
   iniciarLimpezaPeriodicaDeMemoria();
   iniciarHealthCheck();
   iniciarBackupAutomatico();
+  monitorScheduler.iniciar(); // Monitor 24/7
   iniciarProspeccaoAgendada();
   iniciarManutencaoPeriodicaDeCache();
 

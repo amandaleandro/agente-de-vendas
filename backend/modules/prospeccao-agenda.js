@@ -78,6 +78,9 @@ class ProspeccaoAgenda {
       const arquivos = fs.readdirSync(this.diretorioPlanilhas)
         .filter(f => f.endsWith('.csv') && !f.startsWith('.'));
 
+      console.log(`📂 Diretório: ${this.diretorioPlanilhas}`);
+      console.log(`📄 Arquivos encontrados: ${JSON.stringify(arquivos)}`);
+
       if (arquivos.length === 0) {
         console.log(`ℹ️  Nenhuma planilha CSV encontrada em ${this.diretorioPlanilhas}`);
         return [];
@@ -87,7 +90,13 @@ class ProspeccaoAgenda {
       for (const arquivo of arquivos) {
         const caminho = path.join(this.diretorioPlanilhas, arquivo);
         try {
-          const contatosRaw = lerCsv(fs.readFileSync(caminho, 'utf8'));
+          const conteudoRaw = fs.readFileSync(caminho, 'utf8');
+          console.log(`\n📖 Lendo ${arquivo} (${conteudoRaw.length} bytes)`);
+
+          const contatosRaw = lerCsv(conteudoRaw);
+          console.log(`   📊 Linhas parseadas: ${contatosRaw.length}`);
+          console.log(`   Cabeçalho: ${JSON.stringify(contatosRaw[0])}`);
+
           if (contatosRaw.length > 1) {
             const cabecalho = contatosRaw[0].map(c => c.toLowerCase().trim());
             const contatosFormatados = contatosRaw.slice(1).map(linha => {
@@ -97,7 +106,7 @@ class ProspeccaoAgenda {
                 if (key === 'numero' || key === 'celular' || key === 'whatsapp') key = 'telefone';
                 obj[key] = linha[idx] || '';
               });
-              
+
               // Se não achou telefone nem nome pelos headers, tenta pelo índice padrão (0: nome, 1: telefone)
               if (!obj.telefone && linha.length > 1) {
                  obj.nome = linha[0] || '';
@@ -107,12 +116,16 @@ class ProspeccaoAgenda {
               return obj;
             }).filter(c => c.telefone && c.telefone.trim() !== '');
 
+            console.log(`   ✅ ${contatosFormatados.length} contatos com telefone válido`);
+
             planilhas.push({
               nome: arquivo,
               caminho: caminho,
               contatos_totais: contatosFormatados.length,
               contatos: contatosFormatados
             });
+          } else {
+            console.log(`   ⚠️  Arquivo vazio ou sem dados válidos`);
           }
         } catch (err) {
           console.error(`❌ Erro ao carregar ${arquivo}:`, err.message);

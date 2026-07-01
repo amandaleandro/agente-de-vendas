@@ -113,7 +113,16 @@
       "contatos_enviados": 0,
       "erros": 0,
       "fim": "2026-06-30T20:32:32.793Z"
+    },
+    "hora_15.csv": {
+      "status": "concluída",
+      "inicio": "2026-07-01T22:03:36.002Z",
+      "contatos_totais": 20,
+      "contatos_enviados": 8,
+      "erros": 12,
+      "fim": "2026-07-01T22:14:06.201Z"
     }
   },
-  "dataSalvamento": "2026-06-30T20:51:07.539Z"
+  "proximaExecucao": "2026-07-01T23:14:06.201Z",
+  "dataSalvamento": "2026-07-01T22:48:29.364Z"
 }
