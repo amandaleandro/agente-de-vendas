@@ -41,11 +41,12 @@ class KnowledgeBase {
     }
 
     const novo = {
-      id: Date.now().toString(),
+      id: material.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       titulo: material.titulo,
       conteudo: material.conteudo,
       categoria: material.categoria || 'geral',
       palavrasChave: material.palavrasChave || [],
+      origem: material.origem || null,
       criado: new Date().toISOString(),
       atualizado: new Date().toISOString()
     };
@@ -53,6 +54,34 @@ class KnowledgeBase {
     this.materiais.push(novo);
     this.salvarDados();
     return novo;
+  }
+
+  adicionarVarios(materiais) {
+    if (!Array.isArray(materiais) || materiais.length === 0) {
+      throw new Error('Nenhum material para adicionar');
+    }
+
+    const agora = new Date().toISOString();
+    const novos = materiais.map((material, idx) => {
+      if (!material.titulo || !material.conteudo) {
+        throw new Error('Todos os materiais devem ter titulo e conteudo');
+      }
+
+      return {
+        id: material.id || `${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 8)}`,
+        titulo: material.titulo,
+        conteudo: material.conteudo,
+        categoria: material.categoria || 'geral',
+        palavrasChave: material.palavrasChave || [],
+        origem: material.origem || null,
+        criado: agora,
+        atualizado: agora
+      };
+    });
+
+    this.materiais.push(...novos);
+    this.salvarDados();
+    return novos;
   }
 
   // Atualizar material

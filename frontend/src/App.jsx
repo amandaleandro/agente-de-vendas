@@ -1,34 +1,34 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare, Flame, Brain, TrendingUp, Shield, Activity } from 'lucide-react';
+import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare, Flame, Brain, TrendingUp, Shield, Activity, LinkIcon } from 'lucide-react';
 
-import Dashboard from './pages/Dashboard';
-import Conexao from './pages/Conexao';
-import Prospeccao from './pages/Prospeccao';
-import Configuracao from './pages/Configuracao';
-import Analytics from './pages/Analytics';
-import TerminalLogs from './pages/TerminalLogs';
-import Conversas from './pages/Conversas';
-import Warmup from './pages/Warmup';
-import LearningDashboard from './components/LearningDashboard';
-import LearningConfig from './pages/LearningConfig';
-import KnowledgeBase from './pages/KnowledgeBase';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
-import BackupManager from './pages/BackupManager';
-import SystemMonitor from './pages/SystemMonitor';
-import DemoPage from './pages/DemoPage';
-import CRMConfig from './pages/CRMConfig';
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Conexao = lazy(() => import('./pages/Conexao'));
+const Prospeccao = lazy(() => import('./pages/Prospeccao'));
+const Configuracao = lazy(() => import('./pages/Configuracao'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const TerminalLogs = lazy(() => import('./pages/TerminalLogs'));
+const Conversas = lazy(() => import('./pages/Conversas'));
+const Warmup = lazy(() => import('./pages/Warmup'));
+const LearningDashboard = lazy(() => import('./components/LearningDashboard'));
+const LearningConfig = lazy(() => import('./pages/LearningConfig'));
+const KnowledgeBase = lazy(() => import('./pages/KnowledgeBase'));
+const AnalyticsDashboard = lazy(() => import('./components/AnalyticsDashboard'));
+const BackupManager = lazy(() => import('./pages/BackupManager'));
+const SystemMonitor = lazy(() => import('./pages/SystemMonitor'));
+const DemoPage = lazy(() => import('./pages/DemoPage'));
+const CRMConfig = lazy(() => import('./pages/CRMConfig'));
 
 function App() {
   return (
     <BrowserRouter>
       <div className="app-container">
         <nav className="sidebar">
-          <div className="glass-header" style={{ padding: '2rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            <h2 style={{ margin: 0, fontSize: '1.25rem', background: 'linear-gradient(to right, #818cf8, #c084fc)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>🤖 Fezinha Bot</h2>
-            <p style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>Painel Administrativo</p>
+          <div className="glass-header" style={{ padding: '1.25rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <h2 style={{ margin: 0, fontSize: '1.05rem', background: 'linear-gradient(to right, #818cf8, #c084fc)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>🤖 Fezinha Bot</h2>
+            <p style={{ fontSize: '0.78rem', marginTop: '0.2rem' }}>Painel Administrativo</p>
           </div>
-          <div style={{ flex: 1, padding: '1rem 0' }}>
+          <div style={{ flex: 1, padding: '0.75rem 0' }}>
             <NavLink to="/dashboard" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <LayoutDashboard size={20} /> Dashboard
             </NavLink>
@@ -72,31 +72,33 @@ function App() {
               <Activity size={20} /> Monitor Sistema
             </NavLink>
             <NavLink to="/crm" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Link size={20} /> Integrações CRM
+              <LinkIcon size={20} /> Integrações CRM
             </NavLink>
           </div>
         </nav>
         
         <main className="main-content">
-          <Routes>
-            <Route path="/" element={<DemoPage />} />
-            <Route path="/admin" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/analytics-dashboard" element={<AnalyticsDashboard />} />
-            <Route path="/conexao" element={<Conexao />} />
-            <Route path="/prospeccao" element={<Prospeccao />} />
-            <Route path="/conversas" element={<Conversas />} />
-            <Route path="/warmup" element={<Warmup />} />
-            <Route path="/learning" element={<LearningDashboard />} />
-            <Route path="/learning-config" element={<LearningConfig />} />
-            <Route path="/knowledge-base" element={<KnowledgeBase />} />
-            <Route path="/configuracao" element={<Configuracao />} />
-            <Route path="/logs" element={<TerminalLogs />} />
-            <Route path="/backup" element={<BackupManager />} />
-            <Route path="/monitor" element={<SystemMonitor />} />
-            <Route path="/crm" element={<CRMConfig />} />
-          </Routes>
+          <Suspense fallback={<div className="loading">Carregando...</div>}>
+            <Routes>
+              <Route path="/" element={<DemoPage />} />
+              <Route path="/admin" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/analytics-dashboard" element={<AnalyticsDashboard />} />
+              <Route path="/conexao" element={<Conexao />} />
+              <Route path="/prospeccao" element={<Prospeccao />} />
+              <Route path="/conversas" element={<Conversas />} />
+              <Route path="/warmup" element={<Warmup />} />
+              <Route path="/learning" element={<LearningDashboard />} />
+              <Route path="/learning-config" element={<LearningConfig />} />
+              <Route path="/knowledge-base" element={<KnowledgeBase />} />
+              <Route path="/configuracao" element={<Configuracao />} />
+              <Route path="/logs" element={<TerminalLogs />} />
+              <Route path="/backup" element={<BackupManager />} />
+              <Route path="/monitor" element={<SystemMonitor />} />
+              <Route path="/crm" element={<CRMConfig />} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
     </BrowserRouter>

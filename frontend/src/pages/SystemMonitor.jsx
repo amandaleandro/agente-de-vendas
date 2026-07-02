@@ -44,6 +44,14 @@ export default function SystemMonitor() {
   const cor_memoria = metricas.memoria.uso_pct > 80 ? '#ef4444' : metricas.memoria.uso_pct > 60 ? '#f59e0b' : '#10b981';
   const cor_cpu = metricas.cpu.uso > 80 ? '#ef4444' : metricas.cpu.uso > 60 ? '#f59e0b' : '#10b981';
   const cor_disco = metricas.disco.uso_pct > 85 ? '#ef4444' : metricas.disco.uso_pct > 70 ? '#f59e0b' : '#10b981';
+  const bancoOnline = Boolean(metricas.banco_dados.conectado);
+  const bancoLento = bancoOnline && metricas.banco_dados.latencia_ms > 1000;
+  const sistemaOk =
+    metricas.memoria.uso_pct < 70 &&
+    metricas.cpu.uso < 70 &&
+    metricas.disco.uso_pct < 70 &&
+    bancoOnline &&
+    !bancoLento;
 
   return (
     <div className="system-monitor">
@@ -226,9 +234,9 @@ export default function SystemMonitor() {
           {metricas.memoria.uso_pct > 70 && <li>💾 Memória em uso elevado. Considere aumentar RAM.</li>}
           {metricas.cpu.uso > 80 && <li>⚡ CPU em alta carga. Otimize processos ou escale horizontalmente.</li>}
           {metricas.disco.uso_pct > 80 && <li>💿 Espaço em disco baixo. Limpe arquivos antigos.</li>}
-          {!metricas.banco_dados.conectado && <li>🔴 Banco de dados offline! Verifique conexão.</li>}
-          {metricas.banco_dados.latencia_ms > 1000 && <li>🐌 BD lenta. Considere otimizar queries.</li>}
-          {metricas.memoria.uso_pct < 70 && metricas.cpu.uso < 70 && metricas.disco.uso_pct < 70 && (
+          {!bancoOnline && <li>🔴 Banco de dados offline! Verifique conexão.</li>}
+          {bancoLento && <li>🐌 BD lenta. Considere otimizar queries.</li>}
+          {sistemaOk && (
             <li>✅ Tudo funcionando perfeitamente!</li>
           )}
         </ul>

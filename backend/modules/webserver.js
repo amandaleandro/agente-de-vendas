@@ -1,6 +1,9 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const busboy = require('busboy');
+const mammoth = require('mammoth');
+const JSZip = require('jszip');
 const apiProspeccao = require('./api-prospeccao');
 const chatStore = require('./chat-store');
 const learningManager = require('./learning-manager');
@@ -15,6 +18,195 @@ const monitorSystem = require('./monitor-system');
 const crmIntegration = require('./crm-integration');
 
 const PORT = 3099;
+
+const KNOWLEDGE_IMPORT_LIMIT = 20 * 1024 * 1024;
+const KNOWLEDGE_ALLOWED_EXTENSIONS = new Set([
+  '.txt', '.md', '.csv', '.json', '.html', '.docx', '.doc', '.ppt', '.pptx', '.xls', '.xlsx'
+]);
+
+function limparTextoImportado(texto) {
+  return String(texto || '')
+    .replace(/\r/g, '')
+    .replace(/\u0000/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function extrairTextoBinario(buffer) {
+  return limparTextoImportado(
+    buffer
+      .toString('latin1')
+      .replace(/[^\x09\x0A\x0D\x20-\x7EÀ-ÿ]+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+  );
+}
+
+function textoDeXmlOffice(xml) {
+  return limparTextoImportado(
+    String(xml || '')
+      .replace(/<a:t[^>]*>/g, ' ')
+      .replace(/<t[^>]*>/g, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+  );
+}
+
+async function extrairTextoZipOffice(buffer, ext) {
+  const zip = await JSZip.loadAsync(buffer);
+  const caminhos = Object.keys(zip.files)
+    .filter((nome) => {
+      if (!nome.endsWith('.xml')) return false;
+      if (ext === '.pptx') return nome.startsWith('ppt/slides/') || nome.startsWith('ppt/notesSlides/');
+      if (ext === '.xlsx') return nome === 'xl/sharedStrings.xml' || nome.startsWith('xl/worksheets/');
+      return nome.startsWith('word/') || nome.startsWith('docProps/');
+    })
+    .sort();
+
+  const partes = [];
+  for (const caminho of caminhos.slice(0, 80)) {
+    const xml = await zip.files[caminho].async('string');
+    const texto = textoDeXmlOffice(xml);
+    if (texto) partes.push(texto);
+  }
+
+  return limparTextoImportado(partes.join('\n\n'));
+}
+
+async function extrairTextoArquivo(buffer, filename) {
+  const ext = path.extname(filename).toLowerCase();
+
+  if (ext === '.docx') {
+    const resultado = await mammoth.extractRawText({ buffer });
+    return limparTextoImportado(resultado.value);
+  }
+
+  if (['.txt', '.md', '.csv', '.json', '.html'].includes(ext)) {
+    return limparTextoImportado(buffer.toString('utf-8'));
+  }
+
+  if (['.pptx', '.xlsx'].includes(ext)) {
+    return extrairTextoZipOffice(buffer, ext);
+  }
+
+  return extrairTextoBinario(buffer);
+}
+
+function categorizarMaterial(texto, titulo = '') {
+  const base = `${titulo} ${texto}`.toLowerCase();
+  const regras = [
+    { categoria: 'preco', termos: ['preco', 'preço', 'valor', 'plano', 'mensalidade', 'investimento', 'custo', 'r$'] },
+    { categoria: 'integracao', termos: ['integracao', 'integração', 'api', 'webhook', 'crm', 'conectar', 'whatsapp', 'zapier'] },
+    { categoria: 'faq', termos: ['pergunta', 'resposta', 'duvida', 'dúvida', 'como faco', 'como faço', 'preciso', 'posso'] },
+    { categoria: 'caso-uso', termos: ['caso de uso', 'exemplo', 'cenario', 'cenário', 'cliente', 'lead', 'venda', 'prospeccao', 'prospecção'] },
+    { categoria: 'produto', termos: ['produto', 'funcionalidade', 'recurso', 'beneficio', 'benefício', 'solucao', 'solução', 'sistema'] }
+  ];
+
+  let melhor = { categoria: 'geral', score: 0 };
+  regras.forEach((regra) => {
+    const score = regra.termos.reduce((total, termo) => total + (base.includes(termo) ? 1 : 0), 0);
+    if (score > melhor.score) melhor = { categoria: regra.categoria, score };
+  });
+  return melhor.categoria;
+}
+
+function gerarPalavrasChave(texto, titulo) {
+  const stopwords = new Set(['para', 'com', 'uma', 'das', 'dos', 'que', 'por', 'mais', 'como', 'seu', 'sua', 'sobre', 'este', 'esta', 'esse', 'essa', 'voce', 'você']);
+  const frequencia = {};
+  `${titulo} ${texto}`.toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(palavra => palavra.length > 3 && !stopwords.has(palavra))
+    .forEach((palavra) => {
+      frequencia[palavra] = (frequencia[palavra] || 0) + 1;
+    });
+
+  return Object.entries(frequencia)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([palavra]) => palavra);
+}
+
+function dividirEmMateriais(texto, filename) {
+  const nomeBase = path.basename(filename, path.extname(filename));
+  const secoes = texto
+    .split(/\n(?=#{1,3}\s+|[A-ZÀ-Ú0-9][^\n]{3,80}\n[-=]{3,}\n)/)
+    .map(secao => limparTextoImportado(secao))
+    .filter(secao => secao.length >= 80);
+
+  const blocos = secoes.length > 1 ? secoes : [];
+  if (blocos.length === 0) {
+    for (let i = 0; i < texto.length; i += 3500) {
+      const bloco = limparTextoImportado(texto.slice(i, i + 3500));
+      if (bloco.length >= 40) blocos.push(bloco);
+    }
+  }
+
+  return blocos.slice(0, 20).map((conteudo, idx) => {
+    const primeiraLinha = conteudo.split('\n').find(linha => linha.trim().length > 0) || '';
+    const tituloDetectado = primeiraLinha
+      .replace(/^#{1,6}\s*/, '')
+      .replace(/[-=]{3,}/g, '')
+      .trim();
+    const titulo = tituloDetectado.length >= 6 && tituloDetectado.length <= 90
+      ? tituloDetectado
+      : `${nomeBase}${blocos.length > 1 ? ` - parte ${idx + 1}` : ''}`;
+
+    return {
+      titulo,
+      conteudo,
+      categoria: categorizarMaterial(conteudo, titulo),
+      palavrasChave: gerarPalavrasChave(conteudo, titulo),
+      origem: filename
+    };
+  });
+}
+
+async function processarImportacaoKnowledge(req) {
+  const arquivos = [];
+  const rejeitados = [];
+  const bb = busboy({ headers: req.headers, limits: { fileSize: KNOWLEDGE_IMPORT_LIMIT, files: 8 } });
+
+  req.pipe(bb);
+
+  await new Promise((resolve, reject) => {
+    bb.on('file', (fieldname, file, info) => {
+      const filename = path.basename(info.filename || 'arquivo');
+      const ext = path.extname(filename).toLowerCase();
+      const chunks = [];
+
+      if (!KNOWLEDGE_ALLOWED_EXTENSIONS.has(ext)) {
+        rejeitados.push({ arquivo: filename, motivo: 'Formato nao suportado' });
+        file.resume();
+        return;
+      }
+
+      file.on('data', chunk => chunks.push(chunk));
+      file.on('limit', () => rejeitados.push({ arquivo: filename, motivo: 'Arquivo maior que 20MB' }));
+      file.on('end', () => arquivos.push({ filename, buffer: Buffer.concat(chunks) }));
+    });
+    bb.on('close', resolve);
+    bb.on('error', reject);
+  });
+
+  const materiais = [];
+  for (const arquivo of arquivos) {
+    const texto = await extrairTextoArquivo(arquivo.buffer, arquivo.filename);
+    if (!texto || texto.length < 20) {
+      rejeitados.push({ arquivo: arquivo.filename, motivo: 'Nao foi possivel extrair texto suficiente' });
+      continue;
+    }
+    materiais.push(...dividirEmMateriais(texto, arquivo.filename));
+  }
+
+  return { materiais, rejeitados };
+}
 
 const MIME_TYPES = {
   '.html': 'text/html',
@@ -274,6 +466,39 @@ const server = http.createServer((req, res) => {
           mensagem: 'Bot funcionando perfeitamente integrado ao React',
           timestamp: new Date().toISOString()
         });
+      }
+
+      if (url === '/api/demo/chat' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', () => {
+          try {
+            const data = body ? JSON.parse(body) : {};
+            const mensagem = String(data.mensagem || '').trim();
+            if (!mensagem) return json(400, { error: 'Mensagem obrigatoria' });
+
+            const materiais = knowledgeBase.buscarContextoRelevante(mensagem, 3);
+            const textoBase = materiais
+              .map(material => `${material.titulo}\n${material.conteudo}`)
+              .join('\n\n');
+
+            const resposta = textoBase
+              ? textoBase.slice(0, 900)
+              : 'Ainda nao encontrei esse assunto na base de conhecimento. Cadastre materiais na Base de Conhecimento para eu responder essa tela com dados reais do produto.';
+
+            return json(200, {
+              resposta,
+              materiais: materiais.map(material => ({
+                id: material.id,
+                titulo: material.titulo,
+                categoria: material.categoria
+              }))
+            });
+          } catch(e) {
+            return json(500, { error: e.message });
+          }
+        });
+        return;
       }
 
       if (url === '/api/analytics/dados') {
@@ -1129,6 +1354,32 @@ const server = http.createServer((req, res) => {
             return json(400, { erro: err.message });
           }
         });
+      }
+
+      if (url === '/api/knowledge/import' && req.method === 'POST') {
+        return (async () => {
+          try {
+            const { materiais, rejeitados } = await processarImportacaoKnowledge(req);
+
+            if (materiais.length === 0) {
+              return json(400, {
+                sucesso: false,
+                erro: 'Nenhum conteudo valido foi encontrado nos arquivos',
+                rejeitados
+              });
+            }
+
+            const criados = knowledgeBase.adicionarVarios(materiais);
+            return json(201, {
+              sucesso: true,
+              importados: criados.length,
+              materiais: criados,
+              rejeitados
+            });
+          } catch (err) {
+            return json(400, { sucesso: false, erro: err.message });
+          }
+        })();
       }
 
       if (url.startsWith('/api/knowledge/') && req.method === 'PUT') {

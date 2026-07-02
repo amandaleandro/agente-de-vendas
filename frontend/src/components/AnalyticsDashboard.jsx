@@ -11,6 +11,7 @@ export default function AnalyticsDashboard() {
   const [stats, setStats] = useState(null);
   const [padroes, setPadroes] = useState(null);
   const [conversas, setConversas] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -21,15 +22,23 @@ export default function AnalyticsDashboard() {
 
   const carregarDados = async () => {
     try {
-      const [statsRes, padroesRes, conversasRes] = await Promise.all([
+      const [statsRes, padroesRes, conversasRes, analyticsRes] = await Promise.all([
         fetch('/api/learning/stats'),
         fetch('/api/learning/padroes?limite=10'),
-        fetch('/api/learning/conversas?limite=100')
+        fetch('/api/learning/conversas?limite=100'),
+        fetch('/api/analytics/dados')
       ]);
 
       if (statsRes.ok) setStats(await statsRes.json());
-      if (padroesRes.ok) setPadroes(await padroesRes.json());
-      if (conversasRes.ok) setConversas(await conversasRes.json());
+      if (padroesRes.ok) {
+        const data = await padroesRes.json();
+        setPadroes(Array.isArray(data) ? data : data.padroes || []);
+      }
+      if (conversasRes.ok) {
+        const data = await conversasRes.json();
+        setConversas(Array.isArray(data) ? data : data.conversas || []);
+      }
+      if (analyticsRes.ok) setAnalytics(await analyticsRes.json());
       setLoading(false);
     } catch (e) {
       console.error('Erro ao carregar dados:', e);
@@ -42,7 +51,7 @@ export default function AnalyticsDashboard() {
       data_export: new Date().toISOString(),
       stats,
       padroes,
-      conversas: conversas?.slice(0, 50)
+      conversas: Array.isArray(conversas) ? conversas.slice(0, 50) : []
     };
 
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -75,8 +84,8 @@ export default function AnalyticsDashboard() {
 
   // Gráfico 4: Funil (prospectados → responderam → sucesso)
   const funil = [
-    { name: 'Prospectados', value: stats?.total || 0 },
-    { name: 'Com Resposta', value: Math.round((stats?.total || 0) * 0.65) },
+    { name: 'Prospectados', value: analytics?.funil?.prospectados || 0 },
+    { name: 'Com Resposta', value: analytics?.funil?.responderam || 0 },
     { name: 'Sucesso', value: stats?.sucessos || 0 }
   ];
 
@@ -214,7 +223,7 @@ export default function AnalyticsDashboard() {
       <div className="top-respostas">
         <h3>⭐ Respostas com Melhor Conversão</h3>
         <div className="respostas-list">
-          {padroes?.slice(0, 5).map((p, i) => (
+          {(Array.isArray(padroes) ? padroes : []).slice(0, 5).map((p, i) => (
             <div key={i} className="resposta-item">
               <div className="resposta-rank">#{i + 1}</div>
               <div className="resposta-content">
@@ -240,7 +249,7 @@ export default function AnalyticsDashboard() {
         </div>
       )}
 
-      {conversas?.length > 0 && (
+      {Array.isArray(conversas) && conversas.length > 0 && (
         <div className="recent-conversations">
           <h3>🕐 Conversas Recentes</h3>
           <div className="conv-table">
@@ -254,9 +263,9 @@ export default function AnalyticsDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {conversas?.slice(0, 10).map((c, i) => (
+                {conversas.slice(0, 10).map((c, i) => (
                   <tr key={i}>
-                    <td><code>{c.telefone?.slice(-4)}</code></td>
+                    <td><code>{String(c.telefone || '').slice(-4)}</code></td>
                     <td>
                       <span className={`status status-${c.resultado}`}>
                         {c.resultado}
@@ -279,7 +288,7 @@ export default function AnalyticsDashboard() {
 function gerarDadosUltimos30Dias(conversas) {
   const dados = {};
 
-  if (!conversas) return [];
+  if (!Array.isArray(conversas)) return [];
 
   conversas.forEach(c => {
     const data = new Date(c.data).toLocaleDateString('pt-BR');

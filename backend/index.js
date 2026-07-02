@@ -39,7 +39,10 @@ const autoRetrain = require('./modules/auto-retrain');
 const knowledgeBase = require('./modules/knowledge-base');
 // Inicializa variáveis de ambiente primeiro com OVERRIDE
 // Isso garante que se o usuário mudar a configuração pelo painel UI (.env local), ela vença as variáveis estáticas do Docker
-require('dotenv').config({ path: require('path').join(__dirname, 'config', '.env'), override: true });
+require('dotenv').config({
+  path: require('path').join(__dirname, 'config', '.env'),
+  override: process.env.NODE_ENV !== 'production'
+});
 
 let sock;
 const socketsConectados = new Map();

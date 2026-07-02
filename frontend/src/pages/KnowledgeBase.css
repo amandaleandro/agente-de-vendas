@@ -118,6 +118,100 @@
   border-left: 4px solid #667eea;
 }
 
+.kb-import {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-left: 4px solid #2e7d32;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 30px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.kb-import h2 {
+  margin: 0 0 6px 0;
+  color: #333;
+  font-size: 18px;
+}
+
+.kb-import p {
+  margin: 0;
+  color: #666;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.import-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.file-picker {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 9px 14px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.file-picker input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.btn-importar {
+  min-height: 38px;
+  padding: 9px 16px;
+  border: none;
+  border-radius: 6px;
+  background: #2e7d32;
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-importar:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.selected-files {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.selected-files span {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #f5f5f5;
+  color: #555;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
 .kb-form-container h2 {
   margin-top: 0;
   margin-bottom: 20px;
@@ -372,6 +466,9 @@
   margin-bottom: 12px;
   color: #999;
   font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .card-actions {
@@ -424,6 +521,16 @@
 
   .kb-search {
     flex-direction: column;
+  }
+
+  .kb-import {
+    grid-template-columns: 1fr;
+  }
+
+  .import-controls {
+    justify-content: stretch;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .search-input {

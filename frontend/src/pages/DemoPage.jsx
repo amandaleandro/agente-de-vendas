@@ -1,15 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, MessageCircle, TrendingUp, Zap, BarChart3, Check, ChevronRight } from 'lucide-react';
+import { Send, MessageCircle, TrendingUp, Zap, BarChart3, ChevronRight } from 'lucide-react';
 import './DemoPage.css';
 
 export default function DemoPage() {
-  const [mensagens, setMensagens] = useState([
-    {
-      tipo: 'bot',
-      texto: 'Olá! Sou o bot FechaPro. Estou aqui para ajudar com dúvidas sobre vendas, preços, ou agendar uma demo. Como posso ajudar?',
-      timestamp: new Date()
-    }
-  ]);
+  const [mensagens, setMensagens] = useState([]);
+  const [demoDados, setDemoDados] = useState(null);
   const [input, setInput] = useState('');
   const [carregando, setCarregando] = useState(false);
   const messagesEndRef = useRef(null);
@@ -21,6 +16,54 @@ export default function DemoPage() {
   useEffect(() => {
     scrollToBottom();
   }, [mensagens]);
+
+  useEffect(() => {
+    buscarResposta('apresentacao inicial').catch((e) => {
+      console.error('Erro:', e);
+      setMensagens([{
+        tipo: 'bot',
+        texto: 'Nao consegui buscar a resposta da API agora. Tente novamente em instantes.',
+        timestamp: new Date()
+      }]);
+    });
+    carregarDadosDemo();
+  }, []);
+
+  const carregarDadosDemo = async () => {
+    try {
+      const [statusRes, analyticsRes, learningRes] = await Promise.all([
+        fetch('/api/status'),
+        fetch('/api/analytics/dados'),
+        fetch('/api/learning/stats')
+      ]);
+
+      const status = statusRes.ok ? await statusRes.json() : null;
+      const analytics = analyticsRes.ok ? await analyticsRes.json() : null;
+      const learning = learningRes.ok ? await learningRes.json() : null;
+      setDemoDados({ status, analytics, learning });
+    } catch (e) {
+      console.error('Erro ao carregar dados da demo:', e);
+    }
+  };
+
+  const buscarResposta = async (texto) => {
+    const response = await fetch('/api/demo/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mensagem: texto })
+    });
+
+    if (!response.ok) {
+      throw new Error('Falha ao buscar resposta da API');
+    }
+
+    const data = await response.json();
+    setMensagens(prev => [...prev, {
+      tipo: 'bot',
+      texto: data.resposta,
+      timestamp: new Date()
+    }]);
+  };
 
   const enviarMensagem = async (e) => {
     e.preventDefault();
@@ -37,53 +80,19 @@ export default function DemoPage() {
     setCarregando(true);
 
     try {
-      // Simular resposta do bot com delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const respostaBot = gerarRespostaDemo(input);
-      setMensagens(prev => [...prev, {
-        tipo: 'bot',
-        texto: respostaBot,
-        timestamp: new Date()
-      }]);
+      await buscarResposta(input);
     } catch (e) {
       console.error('Erro:', e);
+      setMensagens(prev => [...prev, {
+        tipo: 'bot',
+        texto: 'Nao consegui buscar a resposta da API agora. Tente novamente em instantes.',
+        timestamp: new Date()
+      }]);
     } finally {
       setCarregando(false);
     }
   };
 
-  const gerarRespostaDemo = (input) => {
-    const texto = input.toLowerCase();
-
-    // Respostas predefinidas para demo
-    if (texto.includes('preço') || texto.includes('valor') || texto.includes('custa')) {
-      return 'Oferecemos 3 planos:\n\n💎 Básico - R$ 297/mês\n1 número, até 500 conversas\n\n💎 Profissional - R$ 597/mês\n3 números, até 2.000 conversas, integrações\n\n💎 Enterprise - R$ 1.497/mês\nNúmeros ilimitados, conversas ilimitadas, suporte dedicado\n\nQual plano interessa?';
-    }
-
-    if (texto.includes('demo') || texto.includes('demonstração') || texto.includes('teste')) {
-      return 'Ótimo! A demo mostra:\n\n✅ Como funciona a prospecção automática\n✅ Integração com WhatsApp e CRM\n✅ Dashboard com métricas e alertas\n✅ Sistema de aprendizado que melhora com o tempo\n\nVocê quer agendar uma demo agora? Qual seu nome e email?';
-    }
-
-    if (texto.includes('como funciona')) {
-      return 'O FechaPro funciona assim:\n\n1️⃣ Bot conecta ao WhatsApp\n2️⃣ Envia mensagens de prospecção\n3️⃣ Qualifica leads com perguntas inteligentes\n4️⃣ Registra tudo no dashboard\n5️⃣ Aprende e melhora com cada conversa\n\nTudo automático 24/7!';
-    }
-
-    if (texto.includes('integrações') || texto.includes('pipedrive') || texto.includes('hubspot')) {
-      return 'Temos integrações com:\n\n🔗 Pipedrive - sincroniza leads → deals\n🔗 HubSpot - contactos + sequências\n🔗 Slack - alertas em tempo real\n🔗 Zapier - conecta com 5mil+ apps\n\nQual integração te interessa mais?';
-    }
-
-    if (texto.includes('aprendizado') || texto.includes('ia')) {
-      return 'Nosso sistema de IA é INTELIGENTE:\n\n🧠 Aprende com cada conversa\n🧠 Identifica padrões de sucesso\n🧠 Seleciona respostas que convertem\n🧠 Melhora taxa de conversão em 30 dias\n\nOs dados são seus, a IA trabalha para você!';
-    }
-
-    if (texto.includes('obrigado') || texto.includes('valeu')) {
-      return 'De nada! 😊 Se tiver mais dúvidas, é só chamar. Quer agendar uma demo? Clique no botão abaixo ou continue conversando comigo!';
-    }
-
-    // Resposta padrão
-    return 'Entendi sua pergunta! Você quer saber mais sobre preços, features, integrações ou agendar uma demo? Sinta-se à vontade para perguntar!';
-  };
 
   const sugestoesRapidas = [
     'Qual é o preço?',
@@ -152,7 +161,6 @@ export default function DemoPage() {
                     className="sugestao-btn"
                     onClick={() => {
                       setInput(sug);
-                      // Simular envio
                       setTimeout(() => {
                         const form = document.querySelector('.chat-input form');
                         form?.dispatchEvent(new Event('submit', { bubbles: true }));
@@ -198,8 +206,8 @@ export default function DemoPage() {
               <div className="feature-icon">
                 <TrendingUp size={32} />
               </div>
-              <h3>+40% Conversão</h3>
-              <p>Clientes reportam aumento de 40% em conversões em 30 dias</p>
+              <h3>{demoDados?.analytics?.funil?.taxaConversao || 0}% Conversao</h3>
+              <p>Taxa calculada com as respostas registradas no funil</p>
             </div>
 
             <div className="feature-card">
@@ -219,47 +227,6 @@ export default function DemoPage() {
             </div>
           </div>
 
-          {/* Planos */}
-          <h2 style={{ marginTop: '3rem' }}>Planos e Preços</h2>
-
-          <div className="planos-grid">
-            <div className="plano-card">
-              <div className="plano-badge">Básico</div>
-              <div className="plano-preco">R$ 297<span>/mês</span></div>
-              <ul className="plano-features">
-                <li><Check size={18} /> 1 número WhatsApp</li>
-                <li><Check size={18} /> Até 500 conversas</li>
-                <li><Check size={18} /> Dashboard básico</li>
-                <li><Check size={18} /> Suporte por email</li>
-              </ul>
-              <button className="plano-btn">Começar Agora</button>
-            </div>
-
-            <div className="plano-card destaque">
-              <div className="plano-badge popular">Mais Popular</div>
-              <div className="plano-preco">R$ 597<span>/mês</span></div>
-              <ul className="plano-features">
-                <li><Check size={18} /> 3 números WhatsApp</li>
-                <li><Check size={18} /> Até 2.000 conversas</li>
-                <li><Check size={18} /> Integrações (Slack, CRM)</li>
-                <li><Check size={18} /> Suporte prioritário</li>
-              </ul>
-              <button className="plano-btn destaque-btn">Começar Agora</button>
-            </div>
-
-            <div className="plano-card">
-              <div className="plano-badge">Enterprise</div>
-              <div className="plano-preco">R$ 1.497<span>/mês</span></div>
-              <ul className="plano-features">
-                <li><Check size={18} /> Números ilimitados</li>
-                <li><Check size={18} /> Conversas ilimitadas</li>
-                <li><Check size={18} /> Customizações</li>
-                <li><Check size={18} /> Account manager dedicado</li>
-              </ul>
-              <button className="plano-btn">Contato Comercial</button>
-            </div>
-          </div>
-
           {/* CTA */}
           <div className="cta-section">
             <h2>Pronto para crescer suas vendas?</h2>
@@ -275,20 +242,20 @@ export default function DemoPage() {
           {/* Stats */}
           <div className="stats-grid">
             <div className="stat">
-              <div className="stat-number">500+</div>
-              <div className="stat-label">Conversas/dia</div>
+              <div className="stat-number">{demoDados?.analytics?.funil?.prospectados || 0}</div>
+              <div className="stat-label">Contatos prospectados</div>
             </div>
             <div className="stat">
-              <div className="stat-number">68%</div>
+              <div className="stat-number">{demoDados?.learning?.taxa_sucesso || 0}%</div>
               <div className="stat-label">Taxa de sucesso</div>
             </div>
             <div className="stat">
-              <div className="stat-number">24/7</div>
-              <div className="stat-label">Disponibilidade</div>
+              <div className="stat-number">{demoDados?.status?.numerosConectados || 0}/{demoDados?.status?.numerosConfigurados || 0}</div>
+              <div className="stat-label">WhatsApps conectados</div>
             </div>
             <div className="stat">
-              <div className="stat-number">3min</div>
-              <div className="stat-label">Setup inicial</div>
+              <div className="stat-number">{demoDados?.analytics?.funil?.responderam || 0}</div>
+              <div className="stat-label">Leads que responderam</div>
             </div>
           </div>
         </div>
