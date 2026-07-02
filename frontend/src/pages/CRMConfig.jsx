@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link, Zap, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Zap, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import './CRMConfig.css';
 
 export default function CRMConfig() {

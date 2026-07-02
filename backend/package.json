@@ -17,6 +17,7 @@
     "busboy": "^1.6.0",
     "dotenv": "^16.3.1",
     "mammoth": "^1.12.0",
+    "node-cron": "^4.5.0",
     "node-nlp": "^5.0.0-alpha.5",
     "openai": "^6.44.0",
     "pg": "^8.11.3",
