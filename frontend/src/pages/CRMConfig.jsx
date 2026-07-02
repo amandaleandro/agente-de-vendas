@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Zap, CheckCircle, AlertCircle, Eye, EyeOff, LinkIcon } from 'lucide-react';
 import './CRMConfig.css';
 
 export default function CRMConfig() {
@@ -320,7 +320,7 @@ export default function CRMConfig() {
           </div>
 
           <div className="feature">
-            <Link size={24} />
+            <LinkIcon size={24} />
             <h3>Histórico Completo</h3>
             <p>Conversas do bot integradas no deal</p>
           </div>
@@ -332,7 +332,7 @@ export default function CRMConfig() {
           </div>
 
           <div className="feature">
-            <Link size={24} />
+            <LinkIcon size={24} />
             <h3>Múltiplos CRMs</h3>
             <p>Use Pipedrive, HubSpot ou ambos</p>
           </div>
