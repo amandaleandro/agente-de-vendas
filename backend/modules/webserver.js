@@ -16,6 +16,8 @@ const knowledgeBase = require('./knowledge-base');
 const backupManager = require('./backup-manager');
 const monitorSystem = require('./monitor-system');
 const crmIntegration = require('./crm-integration');
+const smartGenerator = require('./smart-generator');
+const logger = require('./logger');
 
 const PORT = 3099;
 
@@ -1571,6 +1573,129 @@ const server = http.createServer((req, res) => {
         const crm = url.split('/').pop();
         const resultado = crmIntegration.testarConexao(crm);
         return json(resultado.ok ? 200 : 400, resultado);
+      }
+
+      // ===== SMART MESSAGE GENERATOR ENDPOINTS =====
+      if (req.method === 'POST' && url === '/api/prospeccion/gerar-mensagem') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const lead = JSON.parse(body);
+            const result = smartGenerator.generateMessage(lead);
+            if (!result) {
+              return json(400, { erro: 'Erro ao analisar lead' });
+            }
+            return json(200, result);
+          } catch (err) {
+            logger.error('Erro ao gerar mensagem:', err);
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      if (req.method === 'POST' && url === '/api/prospeccion/gerar-variacoes') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { lead, count = 3 } = JSON.parse(body);
+            const result = smartGenerator.generateVariations(lead, count);
+            if (!result) {
+              return json(400, { erro: 'Erro ao analisar lead' });
+            }
+            return json(200, result);
+          } catch (err) {
+            logger.error('Erro ao gerar variações:', err);
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      if (url === '/api/prospeccion/carregar-csv') {
+        const csvPath = path.join(__dirname, '..', 'data', 'google.csv');
+        try {
+          const leads = smartGenerator.loadCSV(csvPath);
+          return json(200, {
+            total: leads.length,
+            leads: leads.slice(0, 10),
+            mensagem: `Carregados ${leads.length} leads do Google Maps`
+          });
+        } catch (err) {
+          logger.error('Erro ao carregar CSV:', err);
+          return json(500, { erro: err.message });
+        }
+      }
+
+      if (req.method === 'POST' && url === '/api/prospeccion/processar-lote') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { csvPath = null, limit = 50, filterProfile = null } = JSON.parse(body);
+            const filepath = csvPath || path.join(__dirname, '..', 'data', 'google.csv');
+            const leads = smartGenerator.loadCSV(filepath);
+            const results = smartGenerator.generateMessages(leads, { limit, filterProfile });
+            const stats = smartGenerator.getStats(results);
+
+            return json(200, {
+              processados: results.length,
+              stats,
+              exemplos: results.slice(0, 5)
+            });
+          } catch (err) {
+            logger.error('Erro ao processar lote:', err);
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      if (req.method === 'POST' && url === '/api/prospeccion/exportar') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { csvPath = null, formato = 'json' } = JSON.parse(body);
+            const filepath = csvPath || path.join(__dirname, '..', 'data', 'google.csv');
+            const leads = smartGenerator.loadCSV(filepath);
+            const results = smartGenerator.generateMessages(leads, { limit: 1000 });
+
+            if (formato === 'json') {
+              const reportPath = smartGenerator.saveResults(results);
+              return json(200, {
+                sucesso: true,
+                arquivo: reportPath,
+                processados: results.length,
+                mensagem: `${results.length} mensagens exportadas em JSON`
+              });
+            } else if (formato === 'csv') {
+              const csvPath = smartGenerator.exportToCSV(results);
+              return json(200, {
+                sucesso: true,
+                arquivo: csvPath,
+                processados: results.length,
+                mensagem: `${results.length} mensagens exportadas em CSV`
+              });
+            } else {
+              return json(400, { erro: 'Formato inválido. Use: json ou csv' });
+            }
+          } catch (err) {
+            logger.error('Erro ao exportar:', err);
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      if (url === '/api/prospeccion/relatorio') {
+        try {
+          const csvPath = path.join(__dirname, '..', 'data', 'google.csv');
+          const leads = smartGenerator.loadCSV(csvPath);
+          const report = smartGenerator.generateReport(leads);
+          return json(200, report);
+        } catch (err) {
+          logger.error('Erro ao gerar relatório:', err);
+          return json(500, { erro: err.message });
+        }
       }
 
       // Fallback for missing APIs
