@@ -1,0 +1,26 @@
+# Backend Dockerfile
+FROM node:18-alpine
+
+WORKDIR /app/backend
+
+# Instalar dependências do sistema
+RUN apk add --no-cache python3 make g++
+
+# Copiar package files
+COPY backend/package*.json ./
+
+# Instalar dependências Node
+RUN npm ci --only=production
+
+# Copiar código
+COPY backend/ .
+
+# Expor porta
+EXPOSE 3099
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:3099/api/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+
+# Start
+CMD ["npm", "start"]

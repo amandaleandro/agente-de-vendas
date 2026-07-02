@@ -1,32 +1,79 @@
 version: '3.8'
 
 services:
-  fezinha:
-    build: .
-    container_name: fezinha-bot
-    ports:
-      - "3099:3099"
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: fechapro-db
     environment:
-      - NODE_ENV=production
-      - NODE_OPTIONS=--max-old-space-size=2048
-      - PROSPECCAO_ATIVA=${PROSPECCAO_ATIVA:-true}
-      - PROSPECCAO_AGENDA_ATIVA=${PROSPECCAO_AGENDA_ATIVA:-true}
-      - WHATSAPP_NUMEROS=${WHATSAPP_NUMEROS:-1}
-      - WHATSAPP_1_NOME=${WHATSAPP_1_NOME:-Fezinha Bot}
-      - IA_PROVIDER=${IA_PROVIDER:-gemini}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - XAI_API_KEY=${XAI_API_KEY}
-      - GROQ_API_KEY=${GROQ_API_KEY}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres123}
+      POSTGRES_DB: ${DB_NAME:-fechapro}
+    ports:
+      - "${DB_PORT:-5432}:5432"
     volumes:
-      - ./backend/sessions:/app/backend/sessions
-      - ./backend/backups:/app/backend/backups
-      - ./backend/arquivos:/app/backend/arquivos
-      - ./backend/config:/app/backend/config
-      - ./backend/listas:/app/backend/listas
-    restart: unless-stopped
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
-      - fezinha-network
+      - fechapro-network
+
+  # Backend Node.js
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: fechapro-api
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3099
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres123}
+      DB_NAME: ${DB_NAME:-fechapro}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      IA_PROVIDER: ${IA_PROVIDER:-gemini}
+    ports:
+      - "${API_PORT:-3099}:3099"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend/backups:/app/backend/backups
+      - ./backend/conhecimento:/app/backend/conhecimento
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3099/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - fechapro-network
+    restart: unless-stopped
+
+  # Frontend React + Nginx
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: fechapro-web
+    ports:
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      - backend
+    networks:
+      - fechapro-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
 
 networks:
-  fezinha-network:
+  fechapro-network:
     driver: bridge
