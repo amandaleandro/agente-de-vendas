@@ -1,10 +1,10 @@
 # FechaPro - Agente de Vendas Automático & Consultivo
 
-**Status**: ✅ **PRONTO PARA VENDER** - Todas as 5 fases implementadas  
-**Ambiente**: Node.js 18+ + React 18 + PostgreSQL + Baileys  
+**Status**: ✅ **PRONTO PARA PRODUÇÃO** - Docker completo + 5 fases  
+**Ambiente**: Docker Compose (Frontend Nginx + Backend Node.js + PostgreSQL)  
 **Principal IA**: Gemini 2.5 Flash (com fallback para OpenAI/xAI)  
-**DB**: PostgreSQL + JSONL (learning system)  
-**Version**: 4.0 (Dashboard + Backup + Monitor + Demo + CRM)
+**DB**: PostgreSQL 15 Alpine + JSONL (learning system)  
+**Version**: 4.1 (Docker ready + Dashboard + Backup + Monitor + Demo + CRM)
 
 ---
 
@@ -22,6 +22,40 @@ Bot de vendas **consultivo e inteligente** que:
 - ✅ **Integração CRM** (Pipedrive + HubSpot)
 - ✅ Painel desktop + mobile
 - ✅ Pronto para escala e monetização
+
+---
+
+## 🐳 Docker Quick Start
+
+**Tudo rodando em 3 containers:**
+
+```bash
+# 1. Iniciar
+docker-compose up -d
+
+# 2. Acessar
+Frontend:  http://localhost:8080
+API:       http://localhost:3099
+Database:  localhost:5432
+
+# 3. Ver logs
+docker-compose logs -f backend
+```
+
+**Ou use o script interativo:**
+- **Windows**: `.\docker-run.bat`
+- **Linux/Mac**: `./docker-run.sh`
+
+**Containers incluídos:**
+- `frontend` (Nginx com React build Vite otimizado)
+- `backend` (Node.js com Baileys + Gemini + módulos)
+- `postgres` (Database PostgreSQL 15 Alpine)
+
+**Pronto para:**
+- ✅ Deploy local em 30 segundos
+- ✅ Deploy em cloud (AWS/Heroku/DigitalOcean)
+- ✅ Scale horizontal com reverse proxy
+- ✅ CI/CD automatizado (GitHub Actions)
 
 ---
 
