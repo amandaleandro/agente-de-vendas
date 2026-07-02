@@ -12,6 +12,7 @@ const slackNotifications = require('./slack-notifications');
 const knowledgeBase = require('./knowledge-base');
 const backupManager = require('./backup-manager');
 const monitorSystem = require('./monitor-system');
+const crmIntegration = require('./crm-integration');
 
 const PORT = 3099;
 
@@ -1257,6 +1258,68 @@ const server = http.createServer((req, res) => {
             return json(400, { erro: err.message });
           }
         });
+      }
+
+      // ===== CRM INTEGRATION ENDPOINTS =====
+      if (url === '/api/crm/status') {
+        const status = crmIntegration.obterStatus();
+        return json(200, status);
+      }
+
+      if (url === '/api/crm/historico') {
+        const queryString = url.split('?')[1] || '';
+        const params = new URLSearchParams(queryString);
+        const limite = parseInt(params.get('limite') || '50');
+        const historico = crmIntegration.obterHistorico(limite);
+        return json(200, { historico, total: historico.length });
+      }
+
+      if (req.method === 'POST' && url === '/api/crm/sincronizar') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', async () => {
+          try {
+            const { lead, crms } = JSON.parse(body);
+            const resultado = await crmIntegration.sincronizarLead(lead, crms);
+            return json(resultado.sucesso ? 200 : 400, resultado);
+          } catch (err) {
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      if (req.method === 'POST' && url === '/api/crm/pipedrive/config') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { api_key } = JSON.parse(body);
+            const status = crmIntegration.configurarPipedrive(api_key);
+            return json(200, { sucesso: true, status });
+          } catch (err) {
+            return json(400, { erro: err.message });
+          }
+        });
+      }
+
+      if (req.method === 'POST' && url === '/api/crm/hubspot/config') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { api_key } = JSON.parse(body);
+            const status = crmIntegration.configurarHubSpot(api_key);
+            return json(200, { sucesso: true, status });
+          } catch (err) {
+            return json(400, { erro: err.message });
+          }
+        });
+      }
+
+      if (url.startsWith('/api/crm/teste/')) {
+        const crm = url.split('/').pop();
+        const resultado = crmIntegration.testarConexao(crm);
+        return json(resultado.ok ? 200 : 400, resultado);
       }
 
       // Fallback for missing APIs

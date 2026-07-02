@@ -1,0 +1,447 @@
+.crm-config {
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.crm-header {
+  margin-bottom: 3rem;
+}
+
+.crm-header h1 {
+  font-size: 2rem;
+  color: #fff;
+  margin: 0 0 0.5rem 0;
+}
+
+.crm-header p {
+  color: #9ca3af;
+  margin: 0;
+}
+
+/* Status Grid */
+.crm-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 2rem;
+  margin-bottom: 3rem;
+}
+
+.crm-card {
+  background: rgba(31, 41, 55, 0.8);
+  border: 2px solid rgba(75, 85, 99, 0.5);
+  border-radius: 12px;
+  padding: 2rem;
+  transition: all 0.3s ease;
+}
+
+.crm-card.conectado {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.crm-card.desconectado {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.crm-card-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.crm-logo {
+  font-size: 2.5rem;
+  width: 60px;
+  height: 60px;
+  background: rgba(75, 85, 99, 0.3);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.crm-card-header h2 {
+  color: #fff;
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+/* Status Badge */
+.crm-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: rgba(75, 85, 99, 0.2);
+  color: #9ca3af;
+  margin-bottom: 1.5rem;
+  font-weight: 600;
+}
+
+.crm-card.conectado .crm-status-badge {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+}
+
+.crm-card.desconectado .crm-status-badge {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+/* Form */
+.crm-form {
+  margin-bottom: 1.5rem;
+}
+
+.crm-form label {
+  display: block;
+  color: #9ca3af;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.input-group {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.crm-form input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background: rgba(75, 85, 99, 0.2);
+  border: 1px solid rgba(75, 85, 99, 0.3);
+  border-radius: 8px;
+  color: white;
+  font-size: 0.95rem;
+}
+
+.crm-form input:focus {
+  outline: none;
+  border-color: #10b981;
+  background: rgba(75, 85, 99, 0.3);
+}
+
+.btn-toggle {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: rgba(129, 140, 248, 0.2);
+  border: 1px solid rgba(129, 140, 248, 0.3);
+  border-radius: 8px;
+  color: #818cf8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.btn-toggle:hover {
+  background: rgba(129, 140, 248, 0.3);
+  border-color: rgba(129, 140, 248, 0.5);
+}
+
+.crm-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.95rem;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.btn-secondary {
+  background: rgba(129, 140, 248, 0.1);
+  border: 1px solid rgba(129, 140, 248, 0.3);
+  color: #818cf8;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(129, 140, 248, 0.2);
+  border-color: rgba(129, 140, 248, 0.5);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.crm-info {
+  padding: 1rem;
+  background: rgba(75, 85, 99, 0.1);
+  border-radius: 8px;
+  border-left: 3px solid #10b981;
+}
+
+.crm-info p {
+  margin: 0;
+  color: #d1d5db;
+  font-size: 0.9rem;
+}
+
+.crm-info a {
+  color: #10b981;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.crm-info a:hover {
+  text-decoration: underline;
+}
+
+/* Sections */
+.crm-section {
+  background: rgba(31, 41, 55, 0.8);
+  border: 1px solid rgba(75, 85, 99, 0.5);
+  border-radius: 12px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+}
+
+.crm-section h2 {
+  color: #fff;
+  margin-top: 0;
+  margin-bottom: 2rem;
+  font-size: 1.5rem;
+}
+
+/* Steps */
+.crm-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+}
+
+.step {
+  text-align: center;
+}
+
+.step-number {
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.25rem;
+  margin: 0 auto 1rem;
+}
+
+.step h3 {
+  color: #fff;
+  margin: 0 0 0.5rem 0;
+}
+
+.step p {
+  color: #9ca3af;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+/* Histórico */
+.historico-table {
+  overflow-x: auto;
+}
+
+.historico-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.historico-table thead {
+  background: rgba(75, 85, 99, 0.3);
+}
+
+.historico-table th {
+  padding: 1rem;
+  text-align: left;
+  color: #9ca3af;
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid rgba(75, 85, 99, 0.5);
+}
+
+.historico-table td {
+  padding: 1rem;
+  color: #d1d5db;
+  border-bottom: 1px solid rgba(75, 85, 99, 0.2);
+}
+
+.historico-table tr:hover {
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.crm-badge {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: rgba(129, 140, 248, 0.2);
+  color: #818cf8;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.status-badge.sucesso {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+}
+
+/* Features */
+.crm-features {
+  background: rgba(31, 41, 55, 0.8);
+  border: 1px solid rgba(75, 85, 99, 0.5);
+  border-radius: 12px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+}
+
+.crm-features h2 {
+  color: #fff;
+  margin-top: 0;
+  margin-bottom: 2rem;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+}
+
+.feature {
+  text-align: center;
+  padding: 1.5rem;
+  background: rgba(75, 85, 99, 0.1);
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.feature:hover {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  transform: translateY(-2px);
+}
+
+.feature svg {
+  color: #10b981;
+  margin-bottom: 1rem;
+}
+
+.feature h3 {
+  color: #fff;
+  margin: 1rem 0 0.5rem 0;
+}
+
+.feature p {
+  color: #9ca3af;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+/* Info Box */
+.crm-info-box {
+  background: rgba(129, 140, 248, 0.1);
+  border-left: 4px solid #818cf8;
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.crm-info-box h3 {
+  color: #818cf8;
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.crm-info-box ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.crm-info-box li {
+  color: #d1d5db;
+  padding: 0.5rem 0;
+}
+
+.crm-info-box a {
+  color: #818cf8;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.crm-info-box a:hover {
+  text-decoration: underline;
+}
+
+.crm-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 400px;
+  font-size: 1.25rem;
+  color: #9ca3af;
+}
+
+/* Responsivo */
+@media (max-width: 768px) {
+  .crm-config {
+    padding: 1rem;
+  }
+
+  .crm-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .crm-status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .crm-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .crm-steps {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .features-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -16,6 +16,8 @@ import KnowledgeBase from './pages/KnowledgeBase';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import BackupManager from './pages/BackupManager';
 import SystemMonitor from './pages/SystemMonitor';
+import DemoPage from './pages/DemoPage';
+import CRMConfig from './pages/CRMConfig';
 
 function App() {
   return (
@@ -69,12 +71,16 @@ function App() {
             <NavLink to="/monitor" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Activity size={20} /> Monitor Sistema
             </NavLink>
+            <NavLink to="/crm" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Link size={20} /> Integrações CRM
+            </NavLink>
           </div>
         </nav>
         
         <main className="main-content">
           <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/" element={<DemoPage />} />
+            <Route path="/admin" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/analytics-dashboard" element={<AnalyticsDashboard />} />
@@ -89,6 +95,7 @@ function App() {
             <Route path="/logs" element={<TerminalLogs />} />
             <Route path="/backup" element={<BackupManager />} />
             <Route path="/monitor" element={<SystemMonitor />} />
+            <Route path="/crm" element={<CRMConfig />} />
           </Routes>
         </main>
       </div>
