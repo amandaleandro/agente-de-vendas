@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const slackNotifications = require('./slack-notifications');
 
 class MetricsManager {
   constructor() {
@@ -56,6 +57,10 @@ class MetricsManager {
 
     fs.appendFileSync(this.metricsFile, `${JSON.stringify(registro)}\n`, 'utf8');
     this.rotacionarMetricasSeNecessario();
+
+    if (severidade === 'critical') {
+      Promise.resolve(slackNotifications.alertaRiscoWhatsApp(registro)).catch(() => {});
+    }
   }
 
   obterResumoRiscoWhatsApp() {

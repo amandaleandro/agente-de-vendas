@@ -55,7 +55,28 @@ class WhatsAppRiskGuard {
     const atual = this.destinatariosPorSessaoDia.get(chave) || new Set();
     atual.add(String(jid || '').split('@')[0]);
     this.destinatariosPorSessaoDia.set(chave, atual);
+
+    this.verificarLimiteDiario(sessao, atual.size);
     return atual.size;
+  }
+
+  limiteDestinatariosDia() {
+    const limite = Number(process.env.WHATSAPP_LIMITE_DESTINATARIOS_DIA);
+    return limite > 0 ? limite : 250;
+  }
+
+  /**
+   * Pausa curta e automática apenas quando o volume foge muito do esperado
+   * para um numero real (limite generoso, so pega excesso grosseiro).
+   * Nao substitui a quota de warmup (que já controla a prospecção fria).
+   */
+  verificarLimiteDiario(sessao, unicosHoje) {
+    const limite = this.limiteDestinatariosDia();
+    if (unicosHoje < limite) return null;
+    if (this.sessaoPausada(sessao)) return null;
+
+    const pausa = this.pausarSessao(sessao, `limite diario de destinatarios atingido (${unicosHoje}/${limite})`, 30);
+    return pausa;
   }
 
   destinatariosUnicosHoje(sessao) {

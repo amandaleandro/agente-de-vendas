@@ -104,6 +104,25 @@ class SlackNotifications {
   }
 
   /**
+   * Notificação de Risco WhatsApp (logout/shadowban/limite atingido)
+   */
+  async alertaRiscoWhatsApp(dados) {
+    const campos = [
+      { title: 'Sessão', value: String(dados.sessao ?? '-'), short: true },
+      { title: 'Evento', value: dados.evento || '-', short: true },
+      { title: 'Detalhe', value: dados.detalhe || '-', short: false },
+      { title: 'Erro', value: dados.erro || '-', short: false }
+    ];
+
+    return this.enviar(
+      '🚨 Risco WhatsApp: possível ban/shadowban',
+      `Evento crítico detectado na sessão ${dados.sessao}. Verifique o número antes de continuar enviando.`,
+      campos,
+      '#d63031'
+    );
+  }
+
+  /**
    * Notificação de Status Geral
    */
   async statusGeral(stats) {
