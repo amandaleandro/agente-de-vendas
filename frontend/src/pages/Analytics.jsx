@@ -53,7 +53,7 @@ export default function Analytics() {
   const leads = dados?.leadsQuentes || [];
   const ultimosEnvios = dados?.ultimosEnvios || [];
   const filas = dados?.filas || { duracaoMedia: '0min', totalPlanilhasMedidas: 0, planilhas: [] };
-  const mensagens = dados?.mensagens || { porTelefone: [], porNumeroDia: [], porNumeroHora: [] };
+  const envios = dados?.envios || dados?.mensagens || { porTelefone: [], porNumeroDia: [], porNumeroHora: [] };
 
   return (
     <div style={{ paddingBottom: '3rem' }}>
@@ -144,11 +144,11 @@ export default function Analytics() {
               <tr style={{ background: 'rgba(0,0,0,0.2)' }}>
                 <th style={{ padding: '0.8rem', textAlign: 'left' }}>Dia</th>
                 <th style={{ padding: '0.8rem', textAlign: 'left' }}>Numero</th>
-                <th style={{ padding: '0.8rem', textAlign: 'left' }}>Msgs</th>
+                <th style={{ padding: '0.8rem', textAlign: 'left' }}>Enviadas</th>
               </tr>
             </thead>
             <tbody>
-              {mensagens.porNumeroDia.slice(0, 30).map((item) => (
+              {envios.porNumeroDia.slice(0, 30).map((item) => (
                 <tr key={`${item.numero}-${item.dia}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                   <td style={{ padding: '0.8rem', color: 'var(--text-dim)' }}>{new Date(`${item.dia}T00:00:00`).toLocaleDateString()}</td>
                   <td style={{ padding: '0.8rem' }}>{item.numero}</td>
@@ -169,11 +169,11 @@ export default function Analytics() {
               <tr style={{ background: 'rgba(0,0,0,0.2)' }}>
                 <th style={{ padding: '0.8rem', textAlign: 'left' }}>Hora</th>
                 <th style={{ padding: '0.8rem', textAlign: 'left' }}>Numero</th>
-                <th style={{ padding: '0.8rem', textAlign: 'left' }}>Msgs</th>
+                <th style={{ padding: '0.8rem', textAlign: 'left' }}>Enviadas</th>
               </tr>
             </thead>
             <tbody>
-              {mensagens.porNumeroHora.slice(0, 30).map((item) => (
+              {envios.porNumeroHora.slice(0, 30).map((item) => (
                 <tr key={`${item.numero}-${item.hora}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                   <td style={{ padding: '0.8rem', color: 'var(--text-dim)' }}>{item.hora}</td>
                   <td style={{ padding: '0.8rem' }}>{item.numero}</td>
@@ -185,7 +185,7 @@ export default function Analytics() {
         </div>
       </div>
 
-      <h2 style={{ marginBottom: '1rem', fontSize: '1.2rem', color: 'var(--primary)' }}>Mensagens por telefone do lead</h2>
+      <h2 style={{ marginBottom: '1rem', fontSize: '1.2rem', color: 'var(--primary)' }}>Mensagens enviadas por telefone do lead</h2>
       <div className="glass-panel" style={{ overflow: 'hidden', marginBottom: '2rem' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -197,7 +197,7 @@ export default function Analytics() {
             </tr>
           </thead>
           <tbody>
-            {mensagens.porTelefone.slice(0, 50).map((item) => (
+            {envios.porTelefone.slice(0, 50).map((item) => (
               <tr key={item.telefone} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                 <td style={{ padding: '1rem' }}>{item.telefone}</td>
                 <td style={{ padding: '1rem' }}>{item.nome}</td>

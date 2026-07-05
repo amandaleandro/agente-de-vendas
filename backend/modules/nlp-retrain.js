@@ -14,7 +14,7 @@ class NLPRetrain {
       // Obter dados de treinamento das conversas bem-sucedidas
       const dados = learningManager.gerarDadosTreinamento();
 
-      if (dados.novasFrases.length === 0) {
+      if (!dados || !dados.novasFrases || dados.novasFrases.length === 0) {
         logger.warn('⚠️ Nenhuma nova frase descoberta para retreinamento');
         return { sucessos: 0, novo_total: 0 };
       }
@@ -22,7 +22,9 @@ class NLPRetrain {
       logger.info(`📚 Adicionando ${dados.novasFrases.length} novas frases ao modelo...`);
 
       let adicionadas = 0;
-      const intencoes_anteriores = new Set(nlpLocal.manager.domainManagers['pt']?.documents?.map(d => d.intent) || []);
+      const intencoes_anteriores = new Set(
+        nlpLocal?.manager?.domainManagers?.['pt']?.documents?.map(d => d.intent) || []
+      );
 
       // Adicionar novas frases ao modelo
       for (const { intencao, frase } of dados.novasFrases) {
@@ -38,10 +40,16 @@ class NLPRetrain {
 
       // Retrainer o modelo
       logger.info('🧠 Treinando modelo com novos dados...');
-      await nlpLocal.manager.train();
-      nlpLocal.treinado = true;
+      if (nlpLocal?.manager?.train) {
+        await nlpLocal.manager.train();
+      }
+      if (nlpLocal) {
+        nlpLocal.treinado = true;
+      }
 
-      const intencoes_novas = new Set(nlpLocal.manager.domainManagers['pt']?.documents?.map(d => d.intent) || []);
+      const intencoes_novas = new Set(
+        nlpLocal?.manager?.domainManagers?.['pt']?.documents?.map(d => d.intent) || []
+      );
       const novas_intencoes = Array.from(intencoes_novas).filter(i => !intencoes_anteriores.has(i));
 
       logger.info('✅ Retreinamento concluído com sucesso!', {
@@ -52,7 +60,7 @@ class NLPRetrain {
 
       return {
         sucessos: adicionadas,
-        novo_total: nlpLocal.manager.domainManagers['pt']?.documents?.length || 0,
+        novo_total: nlpLocal?.manager?.domainManagers?.['pt']?.documents?.length || 0,
         novas_intencoes
       };
     } catch (err) {

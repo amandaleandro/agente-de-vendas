@@ -15,6 +15,16 @@
     "intent": "desinteresse"
   },
   {
+    "texto": "nao e prioridade pra mim",
+    "action": "opt_out",
+    "intent": "desinteresse"
+  },
+  {
+    "texto": "agora nao consigo ver isso",
+    "action": "ai",
+    "intent": "conversa"
+  },
+  {
     "texto": "Ola! Seja bem vindo. Trabalho com:\n- Projeto Arquitetonico\n- Reforma\n- Planejamento\nMe conta qual espaco voce quer reformar?",
     "action": "ignore",
     "intent": "mensagem_automatica"
@@ -31,6 +41,16 @@
   },
   {
     "texto": "quando eu mando orcamento o cliente some",
+    "action": "ai",
+    "intent": "conversa"
+  },
+  {
+    "texto": "caro demais",
+    "action": "ai",
+    "intent": "conversa"
+  },
+  {
+    "texto": "ja uso crm",
     "action": "ai",
     "intent": "conversa"
   },

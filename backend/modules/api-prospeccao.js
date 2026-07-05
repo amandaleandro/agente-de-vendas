@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const busboy = require('busboy');
+const { createProspectingMessage, inferCity, inferSegment } = require('./prospecting-message');
 
 class APIPerspeccao {
   constructor(prospeccaoAgenda) {
@@ -67,8 +68,11 @@ class APIPerspeccao {
       console.log(`✅ Upload recebido: ${uploadedFiles.join(', ')}`);
 
       // Criar fila com as novas planilhas
-      const planilhas = this.agenda.carregarPlanilhas();
+      let planilhas = this.agenda.carregarPlanilhas();
       console.log(`📊 ${planilhas.length} planilhas carregadas do disco`);
+
+      const validacaoWhatsApp = await this.agenda.validarPlanilhasNoWhatsApp(planilhas);
+      planilhas = validacaoWhatsApp.planilhas;
 
       this.agenda.criarFila(planilhas);
       console.log(`🎯 Fila criada com ${this.agenda.fila.length} planilhas`);
@@ -82,6 +86,10 @@ class APIPerspeccao {
         planilhas_carregadas: this.agenda.fila.length,
         total_na_fila: this.agenda.fila.length,
         total_contatos: totalContatos,
+        validacao_whatsapp: {
+          executada: validacaoWhatsApp.validado,
+          removidos: validacaoWhatsApp.removidos.length
+        },
         fila_detalhe: this.agenda.fila.map(p => ({ nome: p.nome, contatos: p.contatos_totais }))
       }));
     } catch (err) {
@@ -218,6 +226,109 @@ class APIPerspeccao {
     }
   }
 
+  montarPreviewContato(contato, index) {
+    const telefone = contato.numero || contato.telefone || contato['telefone/whatsapp'] || contato.whatsapp || contato.celular || '';
+    const lead = {
+      ...contato,
+      telefone,
+      nome: contato.nome || contato.empresa || contato['empresa/nome'] || contato.company || contato.business || ''
+    };
+
+    try {
+      const resultado = createProspectingMessage(lead, { nome: 'Preview' });
+      return {
+        index: index + 1,
+        status: 'pronto',
+        empresa: lead.empresa || lead.nome,
+        telefone,
+        segmento: inferSegment(lead),
+        cidade: inferCity(lead),
+        evidencia: resultado.evidence,
+        oportunidade: resultado.opportunity,
+        mensagem: resultado.message,
+        confianca: resultado.confidence,
+        nivel_personalizacao: resultado.personalizationLevel
+      };
+    } catch (err) {
+      return {
+        index: index + 1,
+        status: 'pesquisa_manual',
+        empresa: lead.empresa || lead.nome || '-',
+        telefone,
+        segmento: inferSegment(lead),
+        cidade: inferCity(lead),
+        motivo: err.message,
+        mensagem: ''
+      };
+    }
+  }
+
+  handlePreview(res) {
+    try {
+      let contatos = [];
+      let fonte = 'nenhuma';
+
+      if (this.agenda.planilhaAtual && this.agenda.planilhaAtual.contatos) {
+        contatos = this.agenda.planilhaAtual.contatos;
+        fonte = 'planilhaAtual';
+      } else if (this.agenda.fila.length > 0 && this.agenda.fila[0].contatos) {
+        contatos = this.agenda.fila[0].contatos;
+        fonte = 'fila[0]';
+      }
+
+      const preview = contatos.map((contato, index) => this.montarPreviewContato(contato, index));
+      const resumo = {
+        total: preview.length,
+        prontos: preview.filter(item => item.status === 'pronto').length,
+        pesquisa_manual: preview.filter(item => item.status === 'pesquisa_manual').length,
+        alta_confianca: preview.filter(item => item.confianca === 'alto').length
+      };
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, fonte, resumo, preview }));
+    } catch (err) {
+      console.error('Erro ao gerar preview de prospeccao:', err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+  }
+
+  handleTemplate(res) {
+    const header = [
+      'empresa',
+      'telefone',
+      'responsavel',
+      'segmento',
+      'cidade',
+      'site',
+      'instagram',
+      'servico_observado',
+      'ponto_positivo',
+      'oportunidade_identificada',
+      'canal_analisado'
+    ].join(';');
+
+    const exemplo = [
+      'Clima Forte',
+      '5534999999999',
+      'Marcos',
+      'ar-condicionado',
+      'Uberlandia',
+      'https://exemplo.com.br',
+      '@climaforte',
+      'instalacao e manutencao',
+      'boas avaliacoes no Google',
+      'orcamento direcionado ao WhatsApp',
+      'site e Instagram'
+    ].join(';');
+
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="template_prospeccao_contextual.csv"'
+    });
+    res.end(`${header}\n${exemplo}\n`);
+  }
+
   /**
    * Retorna o histórico de contatos já prospectados
    */
@@ -231,7 +342,8 @@ class APIPerspeccao {
           status: dados.status,
           sessao: dados.sessao,
           nome: dados.nome,
-          empresa: dados.empresa
+          empresa: dados.empresa,
+          prospeccaoContexto: dados.prospeccaoContexto || null
         }));
       }
       
@@ -246,6 +358,42 @@ class APIPerspeccao {
       res.end(JSON.stringify({ error: err.message }));
     }
   }
+
+  handleMetricas(res) {
+    try {
+      const porOportunidade = {};
+      const porEvidencia = {};
+      const historico = global.prospeccaoHistorico
+        ? Array.from(global.prospeccaoHistorico.historicoEmMemoria.values())
+        : [];
+
+      historico.forEach((item) => {
+        const contexto = item.prospeccaoContexto || {};
+        const oportunidade = contexto.oportunidade || 'sem oportunidade registrada';
+        const evidencia = contexto.evidencia?.label || 'sem evidencia registrada';
+
+        porOportunidade[oportunidade] = (porOportunidade[oportunidade] || 0) + 1;
+        porEvidencia[evidencia] = (porEvidencia[evidencia] || 0) + 1;
+      });
+
+      const ordenar = (obj) => Object.entries(obj)
+        .map(([nome, total]) => ({ nome, total }))
+        .sort((a, b) => b.total - a.total);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        total: historico.length,
+        por_oportunidade: ordenar(porOportunidade),
+        por_evidencia: ordenar(porEvidencia)
+      }));
+    } catch (err) {
+      console.error('Erro ao gerar metricas de prospeccao:', err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+  }
+
 
   /**
    * Retorna os contatos que deram erro na prospeccao
@@ -359,9 +507,24 @@ class APIPerspeccao {
       return true;
     }
 
+    if (url === '/api/prospeccao/preview' && req.method === 'GET') {
+      this.handlePreview(res);
+      return true;
+    }
+
+    if (url === '/api/prospeccao/template' && req.method === 'GET') {
+      this.handleTemplate(res);
+      return true;
+    }
+
     // Histórico de contatos
     if (url === '/api/prospeccao/historico' && req.method === 'GET') {
       this.handleHistorico(res);
+      return true;
+    }
+
+    if (url === '/api/prospeccao/metricas' && req.method === 'GET') {
+      this.handleMetricas(res);
       return true;
     }
 

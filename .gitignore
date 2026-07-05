@@ -32,6 +32,7 @@ yarn-error.log
 # 🚫 NÃO COMMITIR - BANCO DE DADOS
 # ========================================
 postgres_data/
+data/
 *.sql.gz
 *.sql
 !backend/scripts/init-db.sql
@@ -42,6 +43,8 @@ postgres_data/
 backend/listas/*.csv
 backend/conhecimento/
 backend/cache/
+backend/data/
+backend/config/.env
 temp/
 tmp/
 .tmp/

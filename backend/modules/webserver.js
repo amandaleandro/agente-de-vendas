@@ -17,6 +17,9 @@ const backupManager = require('./backup-manager');
 const monitorSystem = require('./monitor-system');
 const crmIntegration = require('./crm-integration');
 const smartGenerator = require('./smart-generator');
+const qualityCenter = require('./quality-center');
+const abTesting = require('./ab-testing');
+const crmPipeline = require('./crm-pipeline');
 const logger = require('./logger');
 
 const PORT = 3099;
@@ -25,6 +28,42 @@ const KNOWLEDGE_IMPORT_LIMIT = 20 * 1024 * 1024;
 const KNOWLEDGE_ALLOWED_EXTENSIONS = new Set([
   '.txt', '.md', '.csv', '.json', '.html', '.docx', '.doc', '.ppt', '.pptx', '.xls', '.xlsx'
 ]);
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function tempoDigitando(conteudo = {}) {
+  const texto = conteudo.text || conteudo.caption || '';
+  if (!texto) return 1200;
+  return Math.min(6000, Math.max(1200, texto.length * 45));
+}
+
+async function enviarComDigitando(socketAtual, destinatario, conteudo) {
+  try {
+    await socketAtual.presenceSubscribe?.(destinatario);
+    await socketAtual.sendPresenceUpdate?.('composing', destinatario);
+    await delay(tempoDigitando(conteudo));
+  } catch (err) {
+    logger.debug('Nao foi possivel enviar indicador digitando', {
+      destinatario,
+      erro: err.message
+    });
+  }
+
+  try {
+    return await socketAtual.sendMessage(destinatario, conteudo);
+  } finally {
+    try {
+      await socketAtual.sendPresenceUpdate?.('paused', destinatario);
+    } catch (err) {
+      logger.debug('Nao foi possivel pausar indicador digitando', {
+        destinatario,
+        erro: err.message
+      });
+    }
+  }
+}
 
 function limparTextoImportado(texto) {
   return String(texto || '')
@@ -250,7 +289,8 @@ const server = http.createServer((req, res) => {
           const conectado = global.socketsConectados && global.socketsConectados.has(sessao);
           const motivo = global.motivosDesconexao ? global.motivosDesconexao.get(sessao) : null;
           const nome = process.env[`WHATSAPP_${i}_NOME`] || `Número ${i}`;
-          statusList.push({ sessao, nome, conectado, temQR, numero: i, motivo });
+          const papel = global.chipRoles ? global.chipRoles.obterPapel(sessao) : 'ambos';
+          statusList.push({ sessao, nome, conectado, temQR, numero: i, motivo, papel });
         }
         return json(200, { 
           status: statusList, 
@@ -259,6 +299,41 @@ const server = http.createServer((req, res) => {
           conectado: (global.socketsConectados ? global.socketsConectados.size : 0) > 0,
           timestamp: new Date().toISOString()
         });
+      }
+
+      // Papéis dos chips (prospecção / maturação / ambos)
+      if (url === '/api/chips/papeis' && req.method === 'GET') {
+        if (!global.chipRoles) return json(500, { error: 'chipRoles não inicializado' });
+        const numeros = Number(process.env.WHATSAPP_NUMEROS) || 1;
+        const papeis = [];
+        for (let i = 1; i <= numeros; i++) {
+          papeis.push({
+            sessao: i,
+            nome: process.env[`WHATSAPP_${i}_NOME`] || `Número ${i}`,
+            papel: global.chipRoles.obterPapel(i),
+            conectado: global.socketsConectados ? global.socketsConectados.has(i) : false
+          });
+        }
+        return json(200, { success: true, papeis });
+      }
+
+      if (url === '/api/chips/papel' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', () => {
+          try {
+            if (!global.chipRoles) return json(500, { error: 'chipRoles não inicializado' });
+            const data = JSON.parse(body);
+            const sessao = parseInt(data.sessao);
+            const papel = String(data.papel || '').toLowerCase();
+            if (!sessao) return json(400, { error: 'Sessão inválida' });
+            const resultado = global.chipRoles.definirPapel(sessao, papel);
+            return json(resultado.sucesso ? 200 : 400, resultado);
+          } catch (e) {
+            return json(500, { error: e.message });
+          }
+        });
+        return;
       }
 
       if (url.startsWith('/api/whatsapp/clear/') && req.method === 'POST') {
@@ -406,7 +481,7 @@ const server = http.createServer((req, res) => {
             }
 
             // Envia mensagem
-            await socketAtual.sendMessage(jid, { text });
+            await enviarComDigitando(socketAtual, jid, { text });
             
             // Adiciona no histórico manual para o front atualizar imediatamente
             chatStore.addMessage(sessao, jid, null, {
@@ -452,6 +527,48 @@ const server = http.createServer((req, res) => {
               chatStore.setRequiresAttention(sessao, jid, false);
             }
             
+            return json(200, { success: true });
+          } catch(e) {
+            return json(500, { error: e.message });
+          }
+        });
+        return;
+      }
+
+      if (url === '/api/chat/pause' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            const sessao = parseInt(data.sessao || '1', 10);
+            const jid = data.jid;
+            if (!jid) return json(400, { error: 'JID obrigatorio' });
+
+            if (global.atendimentosHumanos) global.atendimentosHumanos.add(`${sessao}:${jid}`);
+            if (chatStore.setRequiresAttention) chatStore.setRequiresAttention(sessao, jid, true);
+            return json(200, { success: true });
+          } catch(e) {
+            return json(500, { error: e.message });
+          }
+        });
+        return;
+      }
+
+      if (url === '/api/chat/optout' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            const sessao = parseInt(data.sessao || '1', 10);
+            const jid = data.jid;
+            if (!jid) return json(400, { error: 'JID obrigatorio' });
+
+            if (global.registrarOptOut) global.registrarOptOut(jid);
+            if (global.atendimentosHumanos) global.atendimentosHumanos.add(`${sessao}:${jid}`);
+            if (global.historicosPorContato) global.historicosPorContato.delete(`${sessao}:${jid}`);
+            if (chatStore.setRequiresAttention) chatStore.setRequiresAttention(sessao, jid, false);
             return json(200, { success: true });
           } catch(e) {
             return json(500, { error: e.message });
@@ -513,6 +630,18 @@ const server = http.createServer((req, res) => {
             if ((tel.length === 10 || tel.length === 11) && !tel.startsWith('55')) tel = `55${tel}`;
             return tel;
           };
+          const telefonesConectados = new Set();
+          if (global.socketsConectados) {
+            global.socketsConectados.forEach(socket => {
+              const id = socket?.user?.id;
+              const tel = normalizarTelefone(id);
+              if (tel) telefonesConectados.add(tel);
+            });
+          }
+          const ehTelefoneInterno = (valor) => {
+            const tel = normalizarTelefone(valor);
+            return tel && telefonesConectados.has(tel);
+          };
           const formatarDuracao = (ms) => {
             if (!Number.isFinite(ms) || ms < 0) return '0min';
             const totalSegundos = Math.round(ms / 1000);
@@ -531,9 +660,9 @@ const server = http.createServer((req, res) => {
 
           const leadsEnviados = new Map(); // telefone -> { nome, empresa, data_envio }
           const ultimosEnvios = [];
-          const mensagensPorTelefone = new Map();
-          const mensagensPorNumeroDia = new Map();
-          const mensagensPorNumeroHora = new Map();
+          const enviosPorTelefone = new Map();
+          const enviosPorNumeroDia = new Map();
+          const enviosPorNumeroHora = new Map();
           
           if (fs.existsSync(ARQUIVO_PROSPECCAO)) {
             const linhas = fs.readFileSync(ARQUIVO_PROSPECCAO, 'utf8').split('\n').filter(l => l.trim());
@@ -563,15 +692,15 @@ const server = http.createServer((req, res) => {
                   const dia = dataEnvio.toISOString().slice(0, 10);
                   const hora = `${dia} ${String(dataEnvio.getHours()).padStart(2, '0')}:00`;
                   const numero = `Sessao ${reg.sessao || 1}`;
-                  const porTelefone = incrementar(mensagensPorTelefone, tel, {
+                  const porTelefone = incrementar(enviosPorTelefone, tel, {
                     telefone: tel,
                     nome: reg.nome || 'Desconhecido',
                     empresa: reg.empresa || reg['empresa/nome'] || 'N/A',
                     ultima_data: reg.data
                   });
                   porTelefone.ultima_data = reg.data;
-                  incrementar(mensagensPorNumeroDia, `${numero}|${dia}`, { numero, dia });
-                  incrementar(mensagensPorNumeroHora, `${numero}|${hora}`, { numero, hora });
+                  incrementar(enviosPorNumeroDia, `${numero}|${dia}`, { numero, dia });
+                  incrementar(enviosPorNumeroHora, `${numero}|${hora}`, { numero, hora });
                 }
               } catch(e) {}
             });
@@ -631,7 +760,7 @@ const server = http.createServer((req, res) => {
             linhas.forEach(linha => {
               try {
                 const reg = JSON.parse(linha);
-                if (!reg.enviada_pelo_bot && reg.contato) {
+                if (!reg.enviada_pelo_bot && reg.contato && !reg.is_internal_warmup && !ehTelefoneInterno(reg.contato)) {
                   registrarResposta(reg.contato, reg.texto || '', reg.timestamp || Date.now());
                 }
               } catch(e){}
@@ -642,7 +771,9 @@ const server = http.createServer((req, res) => {
             chatStore.chats.forEach((sessionChats) => {
               sessionChats.forEach((chat, jid) => {
                 chat.messages.forEach((msg) => {
-                  if (!msg.fromMe) registrarResposta(jid, msg.text || '', msg.timestamp || Date.now());
+                  if (!msg.fromMe && !msg.isInternalWarmup && !ehTelefoneInterno(jid)) {
+                    registrarResposta(jid, msg.text || '', msg.timestamp || Date.now());
+                  }
                 });
               });
             });
@@ -667,14 +798,29 @@ const server = http.createServer((req, res) => {
               totalPlanilhasMedidas: planilhasComDuracao.length,
               planilhas: planilhas.sort((a,b) => new Date(b.inicio || 0) - new Date(a.inicio || 0))
             },
-            mensagens: {
-              porTelefone: Array.from(mensagensPorTelefone.values())
+            envios: {
+              porTelefone: Array.from(enviosPorTelefone.values())
                 .sort((a,b) => b.total - a.total)
                 .slice(0, 100),
-              porNumeroDia: Array.from(mensagensPorNumeroDia.values())
+              porNumeroDia: Array.from(enviosPorNumeroDia.values())
                 .sort((a,b) => b.dia.localeCompare(a.dia) || a.numero.localeCompare(b.numero)),
-              porNumeroHora: Array.from(mensagensPorNumeroHora.values())
+              porNumeroHora: Array.from(enviosPorNumeroHora.values())
                 .sort((a,b) => b.hora.localeCompare(a.hora) || a.numero.localeCompare(b.numero))
+            },
+            // Mantem compatibilidade com telas antigas, mas continua contendo somente envios.
+            mensagens: {
+              porTelefone: Array.from(enviosPorTelefone.values())
+                .sort((a,b) => b.total - a.total)
+                .slice(0, 100),
+              porNumeroDia: Array.from(enviosPorNumeroDia.values())
+                .sort((a,b) => b.dia.localeCompare(a.dia) || a.numero.localeCompare(b.numero)),
+              porNumeroHora: Array.from(enviosPorNumeroHora.values())
+                .sort((a,b) => b.hora.localeCompare(a.hora) || a.numero.localeCompare(b.numero))
+            },
+            respostasClientes: {
+              totalLeads: leadsQueResponderam.size,
+              totalMensagens: Array.from(leadsQueResponderam.values())
+                .reduce((total, lead) => total + Number(lead.total_mensagens || 0), 0)
             }
           });
         } catch(e) {
@@ -787,82 +933,6 @@ const server = http.createServer((req, res) => {
         return;
       }
 
-      // Warmup API
-      if (url === '/api/warmup/status' && req.method === 'GET') {
-        try {
-          if (!global.warmupManager) {
-            return json(500, { error: 'WarmupManager não inicializado' });
-          }
-          const relatorio = global.warmupManager.obterRelatorio();
-          return json(200, {
-            status: relatorio,
-            timestamp: new Date().toISOString()
-          });
-        } catch (e) {
-          return json(500, { error: e.message });
-        }
-      }
-
-      if (url.startsWith('/api/warmup/config/') && req.method === 'GET') {
-        try {
-          const sessao = parseInt(url.split('/').pop());
-          if (!global.warmupManager) {
-            return json(500, { error: 'WarmupManager não inicializado' });
-          }
-          const config = global.warmupManager.obterConfiguracao(sessao);
-          return json(200, config);
-        } catch (e) {
-          return json(500, { error: e.message });
-        }
-      }
-
-      if (url === '/api/warmup/reset' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk.toString());
-        req.on('end', () => {
-          try {
-            const data = JSON.parse(body);
-            const sessao = parseInt(data.sessao);
-            if (!global.warmupManager) {
-              return json(500, { error: 'WarmupManager não inicializado' });
-            }
-            const resultado = global.warmupManager.resetarSessao(sessao);
-            return json(200, resultado);
-          } catch (e) {
-            return json(500, { error: e.message });
-          }
-        });
-        return;
-      }
-
-      if (url === '/api/warmup/reset-dia' && req.method === 'POST') {
-        try {
-          if (!global.warmupManager) {
-            return json(500, { error: 'WarmupManager não inicializado' });
-          }
-          global.warmupManager.resetarDia();
-          return json(200, {
-            success: true,
-            message: 'Reset diário executado',
-            relatorio: global.warmupManager.obterRelatorio()
-          });
-        } catch (e) {
-          return json(500, { error: e.message });
-        }
-      }
-
-      if (url === '/api/warmup/estatisticas' && req.method === 'GET') {
-        try {
-          if (!global.warmupManager) {
-            return json(500, { error: 'WarmupManager não inicializado' });
-          }
-          const stats = global.warmupManager.obterEstatisticas();
-          return json(200, { estatisticas: stats });
-        } catch (e) {
-          return json(500, { error: e.message });
-        }
-      }
-
       // Warm Conversation API
       if (url === '/api/conversation/iniciar' && req.method === 'POST') {
         let body = '';
@@ -870,12 +940,20 @@ const server = http.createServer((req, res) => {
         req.on('end', () => {
           try {
             const data = JSON.parse(body);
-            const sessao1 = parseInt(data.sessao1);
-            const sessao2 = parseInt(data.sessao2);
+            const sessao1 = parseInt(data.sessao1, 10);
+            const sessao2 = parseInt(data.sessao2, 10);
             const tema = data.tema || null;
 
             if (!global.warmConversation) {
               return json(500, { error: 'WarmConversation não inicializado' });
+            }
+
+            if (!Number.isInteger(sessao1) || !Number.isInteger(sessao2)) {
+              return json(400, { sucesso: false, erro: 'Selecione duas sessoes validas' });
+            }
+
+            if (sessao1 === sessao2) {
+              return json(400, { sucesso: false, erro: 'As sessoes devem ser diferentes' });
             }
 
             const resultado = global.warmConversation.iniciarConversa(sessao1, sessao2, tema);
@@ -976,6 +1054,79 @@ const server = http.createServer((req, res) => {
       }
 
       // ============ TRAINING APIS ============
+
+      if (url === '/api/whatsapp/risco' && req.method === 'GET') {
+        try {
+          const riskGuard = global.whatsappRiskGuard || require('./whatsapp-risk-guard');
+          if (!global.metrics) {
+            return json(200, {
+              sucesso: true,
+              dados: null,
+              guardiao: riskGuard.relatorio ? riskGuard.relatorio() : null
+            });
+          }
+
+          return json(200, {
+            sucesso: true,
+            dados: global.metrics.obterResumoRiscoWhatsApp(),
+            guardiao: riskGuard.relatorio ? riskGuard.relatorio() : null
+          });
+        } catch (e) {
+          return json(500, { erro: e.message });
+        }
+      }
+
+      if (url === '/api/quality/dashboard' && req.method === 'GET') {
+        try {
+          return json(200, qualityCenter.dashboard());
+        } catch (err) {
+          return json(500, { erro: err.message });
+        }
+      }
+
+      if (url === '/api/quality/handoff' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { sessao, jid, motivo } = JSON.parse(body);
+            if (!sessao || !jid) return json(400, { erro: 'sessao e jid sao obrigatorios' });
+            return json(200, qualityCenter.marcarHandoff(sessao, jid, motivo));
+          } catch (err) {
+            return json(400, { erro: err.message });
+          }
+        });
+      }
+
+      if (url === '/api/quality/simular' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { texto } = JSON.parse(body);
+            return json(200, qualityCenter.simular(texto || ''));
+          } catch (err) {
+            return json(400, { erro: err.message });
+          }
+        });
+      }
+
+      if (url === '/api/ab-tests' && req.method === 'GET') {
+        return json(200, { tests: abTesting.report() });
+      }
+
+      if (url === '/api/ab-tests/record' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { nome, variantId, outcome } = JSON.parse(body);
+            return json(200, { success: true, variant: abTesting.record(nome, variantId, outcome) });
+          } catch (err) {
+            return json(400, { erro: err.message });
+          }
+        });
+      }
 
       if (url === '/api/training/metrics' && req.method === 'GET') {
         try {
@@ -1575,6 +1726,70 @@ const server = http.createServer((req, res) => {
         return json(resultado.ok ? 200 : 400, resultado);
       }
 
+      // ===== FUNIL DE VENDAS (PIPELINE INTERNO) =====
+      if (url === '/api/crm/funil' && req.method === 'GET') {
+        try {
+          return json(200, crmPipeline.funil());
+        } catch (err) {
+          return json(500, { erro: err.message });
+        }
+      }
+
+      if (url.startsWith('/api/crm/funil/detalhe') && req.method === 'GET') {
+        try {
+          const queryString = url.split('?')[1] || '';
+          const params = new URLSearchParams(queryString);
+          const sessao = params.get('sessao');
+          const jid = params.get('jid');
+          if (!sessao || !jid) return json(400, { erro: 'sessao e jid sao obrigatorios' });
+          return json(200, crmPipeline.detalhe(sessao, jid));
+        } catch (err) {
+          return json(404, { erro: err.message });
+        }
+      }
+
+      if (url === '/api/crm/funil/estagio' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { sessao, jid, estagio, motivoPerda } = JSON.parse(body);
+            if (!sessao || !jid || !estagio) return json(400, { erro: 'sessao, jid e estagio sao obrigatorios' });
+            return json(200, { sucesso: true, registro: crmPipeline.definirEstagio(sessao, jid, estagio, motivoPerda) });
+          } catch (err) {
+            return json(400, { erro: err.message });
+          }
+        });
+      }
+
+      if (url === '/api/crm/funil/valor' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { sessao, jid, valor } = JSON.parse(body);
+            if (!sessao || !jid) return json(400, { erro: 'sessao e jid sao obrigatorios' });
+            return json(200, { sucesso: true, registro: crmPipeline.definirValor(sessao, jid, valor) });
+          } catch (err) {
+            return json(400, { erro: err.message });
+          }
+        });
+      }
+
+      if (url === '/api/crm/funil/origem' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { sessao, jid, origem } = JSON.parse(body);
+            if (!sessao || !jid) return json(400, { erro: 'sessao e jid sao obrigatorios' });
+            return json(200, { sucesso: true, registro: crmPipeline.definirOrigem(sessao, jid, origem) });
+          } catch (err) {
+            return json(400, { erro: err.message });
+          }
+        });
+      }
+
       // ===== SMART MESSAGE GENERATOR ENDPOINTS =====
       if (req.method === 'POST' && url === '/api/prospeccion/gerar-mensagem') {
         let body = '';
@@ -1694,6 +1909,93 @@ const server = http.createServer((req, res) => {
           return json(200, report);
         } catch (err) {
           logger.error('Erro ao gerar relatório:', err);
+          return json(500, { erro: err.message });
+        }
+      }
+
+      // ========== NOVOS ENDPOINTS PARA APRIMORAMENTO DO BOT ==========
+
+      // GET /api/sentiment/analise?telefone=551199999999
+      if (url.startsWith('/api/sentiment/analise') && req.method === 'GET') {
+        const telefone = new URL('http://dummy' + url).searchParams.get('telefone');
+        if (!telefone) return json(400, { erro: 'telefone é obrigatório' });
+
+        try {
+          const sentimentAnalyzer = require('./sentiment-analyzer');
+          const perfil = sentimentAnalyzer.clientProfiles.get(telefone);
+          return json(200, {
+            telefone,
+            perfil: perfil || { mensagem: 'Nenhum histórico encontrado' }
+          });
+        } catch (err) {
+          return json(500, { erro: err.message });
+        }
+      }
+
+      // GET /api/sentiment/padroes?tema=preco
+      if (url.startsWith('/api/sentiment/padroes') && req.method === 'GET') {
+        const tema = new URL('http://dummy' + url).searchParams.get('tema');
+        try {
+          const sentimentAnalyzer = require('./sentiment-analyzer');
+          const stats = sentimentAnalyzer.obterEstatisticas(tema);
+          return json(200, stats || { mensagem: `Nenhum padrão encontrado para tema: ${tema}` });
+        } catch (err) {
+          return json(500, { erro: err.message });
+        }
+      }
+
+      // GET /api/conversation/perfil?telefone=551199999999
+      if (url.startsWith('/api/conversation/perfil') && req.method === 'GET') {
+        const telefone = new URL('http://dummy' + url).searchParams.get('telefone');
+        if (!telefone) return json(400, { erro: 'telefone é obrigatório' });
+
+        try {
+          const conversationContext = require('./conversation-context');
+          const perfil = conversationContext.obterPerfil(telefone);
+          return json(200, {
+            telefone,
+            perfil: perfil || { mensagem: 'Nenhum perfil registrado' }
+          });
+        } catch (err) {
+          return json(500, { erro: err.message });
+        }
+      }
+
+      // POST /api/sentiment/registrar-resultado
+      if (url === '/api/sentiment/registrar-resultado' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        return req.on('end', () => {
+          try {
+            const { tema, resposta, resultado } = JSON.parse(body);
+            if (!tema || !resposta || !resultado) {
+              return json(400, { erro: 'tema, resposta e resultado são obrigatórios' });
+            }
+
+            const sentimentAnalyzer = require('./sentiment-analyzer');
+            sentimentAnalyzer.registrarResultadoResposta(tema, resposta, resultado);
+            return json(200, {
+              sucesso: true,
+              mensagem: `Resultado registrado: ${resultado} para tema ${tema}`
+            });
+          } catch (err) {
+            return json(500, { erro: err.message });
+          }
+        });
+      }
+
+      // GET /api/sentiment/recomendacao?frustacao=0.5&engajamento=0.7&sentimento=positivo
+      if (url.startsWith('/api/sentiment/recomendacao') && req.method === 'GET') {
+        const searchParams = new URL('http://dummy' + url).searchParams;
+        const frustacao = parseFloat(searchParams.get('frustacao')) || 0;
+        const engajamento = parseFloat(searchParams.get('engajamento')) || 0.5;
+        const sentimento = searchParams.get('sentimento') || 'neutro';
+
+        try {
+          const sentimentAnalyzer = require('./sentiment-analyzer');
+          const estrategia = sentimentAnalyzer.recomendarEstrategia(sentimento, frustacao, engajamento);
+          return json(200, { estrategia });
+        } catch (err) {
           return json(500, { erro: err.message });
         }
       }

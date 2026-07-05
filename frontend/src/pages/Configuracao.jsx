@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Key, Cpu, RotateCcw } from 'lucide-react';
+import { Save, Key, Cpu } from 'lucide-react';
 
 export default function Configuracao() {
   const [config, setConfig] = useState({
@@ -12,8 +12,6 @@ export default function Configuracao() {
   });
 
   const [loading, setLoading] = useState(true);
-  const [warmupStatus, setWarmupStatus] = useState([]);
-  const [resettingSession, setResettingSession] = useState(null);
 
   useEffect(() => {
     fetch('/api/config')
@@ -30,22 +28,6 @@ export default function Configuracao() {
         });
         setLoading(false);
       });
-
-    // Carregar status do warmup
-    fetch('/api/warmup/status')
-      .then(r => r.json())
-      .then(data => setWarmupStatus(data.status || []))
-      .catch(() => {});
-
-    // Atualizar a cada 30 segundos
-    const interval = setInterval(() => {
-      fetch('/api/warmup/status')
-        .then(r => r.json())
-        .then(data => setWarmupStatus(data.status || []))
-        .catch(() => {});
-    }, 30000);
-
-    return () => clearInterval(interval);
   }, []);
 
   const handleChange = (e) => {
@@ -72,42 +54,7 @@ export default function Configuracao() {
       .then(data => {
         if (data.success) {
           alert('Configurações salvas!');
-          fetch('/api/reiniciar-bot', { method: 'POST' }); // auto-restart
-        }
-      });
-  };
-
-  const resetarSessao = (sessao) => {
-    if (!confirm(`Tem certeza que quer resetar a sessão ${sessao}? Isso limpará todos os dados de warmup.`)) return;
-
-    setResettingSession(sessao);
-    fetch('/api/warmup/reset', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessao })
-    }).then(r => r.json())
-      .then(data => {
-        if (data.success) {
-          alert(`Sessão ${sessao} resetada com sucesso!`);
-          // Recarregar warmup status
-          fetch('/api/warmup/status')
-            .then(r => r.json())
-            .then(d => setWarmupStatus(d.status || []))
-            .finally(() => setResettingSession(null));
-        }
-      })
-      .catch(() => setResettingSession(null));
-  };
-
-  const resetarDia = () => {
-    if (!confirm('Resetar todos os contadores do dia?')) return;
-
-    fetch('/api/warmup/reset-dia', { method: 'POST' })
-      .then(r => r.json())
-      .then(data => {
-        if (data.success) {
-          alert('Contadores diários resetados!');
-          setWarmupStatus(data.relatorio || []);
+          fetch('/api/reiniciar-bot', { method: 'POST' });
         }
       });
   };
@@ -212,111 +159,6 @@ export default function Configuracao() {
           </button>
         </div>
 
-        <div className="glass-panel" style={{ padding: '1.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-            <h2 style={{ margin: 0 }}>🔥 Warmup - Limite de Envios</h2>
-            <button className="btn btn-secondary" onClick={resetarDia} style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}>
-              <RotateCcw size={14} style={{ marginRight: '0.25rem' }} /> Reset Diário
-            </button>
-          </div>
-
-          <p style={{ color: '#94a3b8', marginBottom: '1rem', fontSize: '0.9rem' }}>
-            O warmup controla quantas mensagens cada número pode enviar por dia, aumentando gradualmente conforme o número "aquece".
-          </p>
-
-          {warmupStatus.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
-              Carregando dados de warmup...
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem' }}>
-              {warmupStatus.map(status => (
-                <div key={status.sessao} style={{
-                  border: '1px solid #334155',
-                  borderRadius: '8px',
-                  padding: '1rem',
-                  backgroundColor: '#1e293b'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.75rem' }}>
-                    <div>
-                      <h3 style={{ margin: '0 0 0.25rem 0', color: '#fff', fontSize: '1rem' }}>
-                        Sessão {status.sessao}
-                      </h3>
-                      <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>
-                        {status.nivelTexto}
-                      </p>
-                    </div>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => resetarSessao(status.sessao)}
-                      disabled={resettingSession === status.sessao}
-                      style={{
-                        fontSize: '0.75rem',
-                        padding: '0.25rem 0.5rem',
-                        opacity: resettingSession === status.sessao ? 0.6 : 1
-                      }}
-                    >
-                      <RotateCcw size={12} />
-                    </button>
-                  </div>
-
-                  {/* Barra de progresso */}
-                  <div style={{ marginBottom: '0.75rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.25rem' }}>
-                      <span style={{ color: '#e2e8f0' }}>
-                        {status.enviados}/{status.quota}
-                      </span>
-                      <span style={{ color: '#94a3b8' }}>
-                        {status.diasAtivos} dia(s)
-                      </span>
-                    </div>
-                    <div style={{
-                      width: '100%',
-                      height: '8px',
-                      backgroundColor: '#334155',
-                      borderRadius: '4px',
-                      overflow: 'hidden'
-                    }}>
-                      <div style={{
-                        width: `${Math.min((status.enviados / status.quota) * 100, 100)}%`,
-                        height: '100%',
-                        backgroundColor: status.podeEnviar ? '#10b981' : '#ef4444',
-                        transition: 'width 0.3s ease'
-                      }} />
-                    </div>
-                  </div>
-
-                  {/* Métricas */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem' }}>
-                    <div style={{ padding: '0.5rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderRadius: '4px', border: '1px solid #10b98133' }}>
-                      <div style={{ color: '#94a3b8' }}>Erros</div>
-                      <div style={{ color: '#10b981', fontWeight: 'bold' }}>
-                        {status.erros}
-                      </div>
-                    </div>
-                    <div style={{ padding: '0.5rem', backgroundColor: status.podeEnviar ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', borderRadius: '4px', border: status.podeEnviar ? '1px solid #10b98133' : '1px solid #ef444433' }}>
-                      <div style={{ color: '#94a3b8' }}>Status</div>
-                      <div style={{ color: status.podeEnviar ? '#10b981' : '#ef4444', fontWeight: 'bold' }}>
-                        {status.podeEnviar ? '✅ Ativo' : '⏸️ Pausado'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#334155', borderRadius: '8px', fontSize: '0.8rem', lineHeight: '1.6', color: '#cbd5e1' }}>
-            <strong>📚 Níveis do Warmup:</strong>
-            <ul style={{ margin: '0.5rem 0 0 1.5rem' }}>
-              <li>❄️ Nível 1: 10 msgs/dia (Dias 1-2)</li>
-              <li>🧊 Nível 2: 20 msgs/dia (Dias 3-4)</li>
-              <li>🔥 Nível 3: 50 msgs/dia (Dias 5-6)</li>
-              <li>🚀 Nível 4: 100 msgs/dia (Dia 7+)</li>
-              <li>⚡ Nível 5: 200 msgs/dia (Sem erros)</li>
-            </ul>
-          </div>
-        </div>
       </div>
     </div>
   );

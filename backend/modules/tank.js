@@ -198,7 +198,7 @@ class MessageTank {
     return fila.find(m => !m.enviado);
   }
 
-  async enviarProxima(telefone, socketAtual, warmup, sessao, enviarPeloBot) {
+  async enviarProxima(telefone, socketAtual, sessao, enviarPeloBot) {
     const proxima = this.obterProxima(telefone);
     if (!proxima) return null;
 

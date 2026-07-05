@@ -1,10 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { QrCode as QrCodeIcon, CheckCircle2, RefreshCw } from 'lucide-react';
+import { QrCode as QrCodeIcon, CheckCircle2, RefreshCw, Send, Flame } from 'lucide-react';
 import QRCode from 'react-qr-code';
+
+const PAPEIS = [
+  { valor: 'ambos', rotulo: 'Prospecção + Maturação' },
+  { valor: 'prospeccao', rotulo: 'Só Prospecção' },
+  { valor: 'maturacao', rotulo: 'Só Maturação' }
+];
 
 export default function Conexao() {
   const [status, setStatus] = useState([]);
   const [qrcodes, setQrcodes] = useState({});
+  const [salvandoPapel, setSalvandoPapel] = useState(null);
+
+  const alterarPapel = async (sessao, papel) => {
+    setSalvandoPapel(sessao);
+    try {
+      const res = await fetch('/api/chips/papel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessao, papel })
+      });
+      if (!res.ok) {
+        const erro = await res.json().catch(() => ({}));
+        throw new Error(erro.error || erro.erro || 'Erro ao salvar papel do chip');
+      }
+      await fetchData();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSalvandoPapel(null);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -40,8 +67,30 @@ export default function Conexao() {
       <div className="grid-cards">
         {status.map((sessao) => (
           <div key={sessao.sessao} className="glass-panel" style={{ padding: '1.5rem', textAlign: 'center' }}>
-            <h3 style={{ marginBottom: '1rem' }}>{sessao.nome}</h3>
-            
+            <h3 style={{ marginBottom: '0.75rem' }}>{sessao.nome}</h3>
+
+            <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+              {sessao.papel === 'maturacao' ? <Flame size={16} color="#f59e0b" /> : <Send size={16} color="#38bdf8" />}
+              <select
+                value={sessao.papel || 'ambos'}
+                disabled={salvandoPapel === sessao.sessao}
+                onChange={(e) => alterarPapel(sessao.sessao, e.target.value)}
+                style={{
+                  background: 'rgba(255,255,255,0.06)',
+                  color: 'inherit',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: '8px',
+                  padding: '0.35rem 0.5rem',
+                  fontSize: '0.85rem',
+                  cursor: 'pointer'
+                }}
+              >
+                {PAPEIS.map(p => (
+                  <option key={p.valor} value={p.valor} style={{ color: '#0f172a' }}>{p.rotulo}</option>
+                ))}
+              </select>
+            </div>
+
             {sessao.conectado ? (
               <div style={{ padding: '2rem 0' }}>
                 <CheckCircle2 size={48} color="#34d399" style={{ margin: '0 auto 1rem' }} />

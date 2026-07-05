@@ -13,9 +13,10 @@ const monitorScheduler = require('./modules/monitor-scheduler');
 const webserver = require('./modules/webserver');
 const chatStore = require('./modules/chat-store'); // Armazena conversas no painel
 const crossWarmupManager = require('./modules/cross-warmup');
+const chipRoles = require('./modules/chip-roles');
+global.chipRoles = chipRoles;
 const gatilhos = require('./modules/gatilhos');
 const intentClassifier = require('./modules/intent-classifier');
-const WarmupManager = require('./modules/warmup');
 const WarmConversationManager = require('./modules/warm-conversation');
 const MessageTank = require('./modules/tank');
 const MetricsManager = require('./modules/metrics');
@@ -31,12 +32,21 @@ const DiagnosticoPrompt = require('./modules/diagnostico-prompt');
 const ProspeccaoHistorico = require('./modules/prospeccao-historico');
 const ProspeccaoAgenda = require('./modules/prospeccao-agenda');
 const APIPerspeccao = require('./modules/api-prospeccao');
+const WarmupManager = require('./modules/warmup');
 const TrainerService = require('./modules/trainer-service');
 const LeadScorer = require('./modules/lead-scorer');
 const FollowupScheduler = require('./modules/followup-scheduler');
 const learningManager = require('./modules/learning-manager');
 const autoRetrain = require('./modules/auto-retrain');
 const knowledgeBase = require('./modules/knowledge-base');
+const WhatsAppValidator = require('./modules/whatsapp-validator');
+const roteiroDinamico = require('./modules/roteiro-dinamico');
+const fallbackConsultivo = require('./modules/fallback-consultivo');
+const conversationContext = require('./modules/conversation-context');
+const sentimentAnalyzer = require('./modules/sentiment-analyzer');
+const { createProspectingMessage } = require('./modules/prospecting-message');
+const proxyManager = require('./modules/proxy-manager');
+const whatsappRiskGuard = require('./modules/whatsapp-risk-guard');
 // Inicializa variáveis de ambiente primeiro com OVERRIDE
 // Isso garante que se o usuário mudar a configuração pelo painel UI (.env local), ela vença as variáveis estáticas do Docker
 require('dotenv').config({
@@ -46,6 +56,10 @@ require('dotenv').config({
 
 let sock;
 const socketsConectados = new Map();
+// Anti-loop: contagem de mensagens idênticas recebidas por contato (detecta auto-responders)
+const mensagensRecebidasPorContato = new Map();
+const ANTI_LOOP_LIMITE = 3;
+const ANTI_LOOP_JANELA_MS = 24 * 60 * 60 * 1000;
 const qrPorSessao = new Map();
 let qrGenerated = false;
 let prospeccaoAgendadaExecutando = false;
@@ -73,6 +87,44 @@ global.apiPerspeccao = null; // Será inicializado depois
 
 const motivosDesconexao = new Map();
 global.motivosDesconexao = motivosDesconexao;
+const warmupManager = new WarmupManager();
+global.warmupManager = warmupManager;
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function tempoDigitando(conteudo = {}) {
+  const texto = conteudo.text || conteudo.caption || '';
+  if (!texto) return 1200;
+  return Math.min(6000, Math.max(1200, texto.length * 45));
+}
+
+async function enviarComDigitando(socketAtual, destinatario, conteudo) {
+  try {
+    await socketAtual.presenceSubscribe?.(destinatario);
+    await socketAtual.sendPresenceUpdate?.('composing', destinatario);
+    await delay(tempoDigitando(conteudo));
+  } catch (err) {
+    logger.debug('Nao foi possivel enviar indicador digitando', {
+      destinatario,
+      erro: err.message
+    });
+  }
+
+  try {
+    return await socketAtual.sendMessage(destinatario, conteudo);
+  } finally {
+    try {
+      await socketAtual.sendPresenceUpdate?.('paused', destinatario);
+    } catch (err) {
+      logger.debug('Nao foi possivel pausar indicador digitando', {
+        destinatario,
+        erro: err.message
+      });
+    }
+  }
+}
 
 global.limparSessao = async (sessao) => {
   const s = parseInt(sessao);
@@ -117,16 +169,15 @@ global.atendimentosHumanos = atendimentosHumanos;
 global.retomadasPendentes = retomadasPendentes;
 global.historicosPorContato = historicosPorContato;
 global.optOutContatos = optOutContatos;
+global.registrarOptOut = registrarOptOut;
 let bancoIndisponivelAte = 0;
 let baseConhecimento = '';
+let baseConhecimentoChunks = []; // base quebrada em pedaços para busca por relevância
 let prospeccaoIniciada = false;
 let quotaEmDanger = false; // Flag para economizar tokens quando quota está baixa
 let ultimoErroQuota = 0; // Timestamp do último erro de quota
-const warmup = new WarmupManager();
-global.warmupManager = warmup; // Exportar para APIs
 const warmConversation = new WarmConversationManager();
 global.warmConversation = warmConversation; // Exportar para APIs
-let ultimoResetWarmup = new Date().toDateString();
 let tank = null; // Será inicializado após IA estar pronta
 let processadorTankAtivo = false;
 const tentativasReconexao = new Map(); // sessao -> { tentativas, proximaTentativaEm }
@@ -210,6 +261,10 @@ function registrarOptOut(contato) {
   if (!normalizado) return;
   optOutContatos.add(normalizado);
   salvarOptOuts();
+
+  if (global.followupScheduler) {
+    global.followupScheduler.cancelarFollowup(normalizado);
+  }
 }
 
 carregarOptOuts();
@@ -224,7 +279,27 @@ async function enviarPeloBot(socketAtual, destinatario, conteudo, sessao = 1) {
   const chave = `${destinatario}`;
   enviosBotEmAndamento.add(chave);
   try {
-    const enviada = await socketAtual.sendMessage(destinatario, conteudo);
+    const pausa = whatsappRiskGuard.sessaoPausada(sessao);
+    if (pausa) {
+      throw new Error(`Sessao ${sessao} pausada por risco: ${pausa.motivo}`);
+    }
+
+    const textoEnvio = conteudo?.text || '';
+    const analiseConteudo = whatsappRiskGuard.analisarConteudo(textoEnvio);
+    if (analiseConteudo.risco === 'alto') {
+      logger.warn('Mensagem com termos sensiveis detectada', {
+        sessao,
+        destinatario,
+        termos: analiseConteudo.termos
+      });
+    }
+
+    const enviada = await enviarComDigitando(socketAtual, destinatario, conteudo);
+    const destinatariosUnicosHoje = whatsappRiskGuard.registrarDestinatario(sessao, destinatario);
+    if (destinatariosUnicosHoje > 0 && destinatariosUnicosHoje % 25 === 0) {
+      logger.warn('Volume de destinatarios unicos subindo', { sessao, destinatariosUnicosHoje });
+    }
+
     const id = enviada?.key?.id;
     if (id) {
       mensagensEnviadasPeloBot.set(id, Date.now());
@@ -245,14 +320,57 @@ async function enviarPeloBot(socketAtual, destinatario, conteudo, sessao = 1) {
       read: true 
     });
 
-    warmup.registrarEnvio(sessao, true);
     return enviada;
   } catch (err) {
-    warmup.registrarEnvio(sessao, false);
+    if (whatsappRiskGuard.erroIndicaShadowban(err)) {
+      const pausa = whatsappRiskGuard.pausarSessao(sessao, 'possivel shadowban detectado', 120);
+      metrics.registrarRiscoWhatsApp({
+        sessao,
+        evento: 'shadowban_detectado',
+        severidade: 'critical',
+        telefone: destinatario,
+        erro: err.message
+      });
+      logger.error('Possivel shadowban detectado. Sessao pausada temporariamente.', {
+        sessao,
+        destinatario,
+        pausaAte: new Date(pausa.ate).toISOString(),
+        erro: err.message
+      });
+    } else {
+      metrics.registrarRiscoWhatsApp({
+        sessao,
+        evento: 'envio_rejeitado',
+        severidade: 'warning',
+        telefone: destinatario,
+        erro: err.message
+      });
+    }
     throw err;
   } finally {
     setTimeout(() => enviosBotEmAndamento.delete(chave), 2_000);
   }
+}
+
+function ehJidNumeroConectado(jid) {
+  if (!jid || !global.socketsConectados) return false;
+  const numero = String(jid).split('@')[0].split(':')[0].replace(/\D/g, '');
+  if (!numero) return false;
+
+  return Array.from(global.socketsConectados.values()).some(s => {
+    const id = s?.user?.id;
+    if (!id) return false;
+    const numeroConectado = String(id).split('@')[0].split(':')[0].replace(/\D/g, '');
+    return numeroConectado && numero === numeroConectado;
+  });
+}
+
+function adicionarMensagemInternaWarmup(sessao, jid, name, messageObj) {
+  chatStore.addMessage(sessao, jid, name, {
+    ...messageObj,
+    isInternalWarmup: true,
+    read: true
+  }, { persist: false });
 }
 
 const roteiroHeuristico = require('./modules/roteiro-heuristico');
@@ -270,12 +388,18 @@ const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
+// Groq: API compatível com OpenAI, free tier generoso e muito rápido
+const groq = process.env.GROQ_API_KEY
+  ? new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: 'https://api.groq.com/openai/v1' })
+  : null;
+
 const iaProvider = (process.env.IA_PROVIDER || 'gemini').toLowerCase();
 const URL_DIAGNOSTICO = 'https://fechapro.com.br/diagnostico';
 const URL_COMPRA_ANUAL = 'https://fechapro.com.br/auth/signup?plan=annual';
 const TEMPO_RETORNO_IA_MS = 10 * 60 * 1000;
 
 const metrics = new MetricsManager();
+global.metrics = metrics;
 const security = new SecurityManager();
 const diagnosticoPrompt = new DiagnosticoPrompt();
 const prospeccaoHistorico = new ProspeccaoHistorico();
@@ -300,6 +424,13 @@ COMO RESPONDER:
 - Se a pessoa contou um problema: reconheça com empatia, depois pergunte mais
 - Se for dar informação: seja direto e conciso
 - Se tiver que fechar venda: apresente preço/plano de forma natural
+
+IDENTIDADE E PERGUNTAS SOBRE SER IA/BOT:
+- Nunca se apresente como IA, inteligência artificial, modelo, robô, chatbot ou assistente virtual
+- Se perguntarem "é bot?", "é IA?" ou algo parecido, não confirme isso e não entre em debate
+- Responda de forma leve como alguém do atendimento: "sou do time por aqui" ou "tô te atendendo por aqui"
+- Em seguida volte para o contexto comercial com uma pergunta útil
+- Não diga "como uma IA", "sou uma IA", "sou assistente", "fui treinado" ou frases parecidas
 
 QUANDO NÃO RESPONDER:
 - Pessoa disse “não quero, não preciso, não tenho interesse”: respeite, envie apenas uma mensagem curta de confirmação
@@ -360,6 +491,25 @@ function carregarProspectos(arquivo) {
 
   const vistos = new Set();
   return linhas.slice(1)
+    .map(col => {
+      const lead = {};
+      cab.forEach((nomeColuna, index) => {
+        if (nomeColuna) lead[nomeColuna] = col[index]?.trim() || '';
+      });
+
+      return {
+        ...lead,
+        nome: col[iNome]?.trim(),
+        empresa: col[iNome]?.trim(),
+        telefone: normalizarTelefone(col[iTelefone]),
+        categoria: iCategoria >= 0 ? col[iCategoria]?.trim() || '' : lead.categoria || lead.segmento || '',
+        endereco: iEndereco >= 0 ? col[iEndereco]?.trim() || '' : lead.endereco || lead.address || '',
+        site: iSite >= 0 ? col[iSite]?.trim() || '' : lead.site || lead.website || ''
+      };
+    })
+    .filter(p => p.nome && p.telefone && !vistos.has(p.telefone) && vistos.add(p.telefone));
+
+  return linhas.slice(1)
     .map(col => ({
       nome: col[iNome]?.trim(),
       telefone: normalizarTelefone(col[iTelefone]),
@@ -370,7 +520,42 @@ function carregarProspectos(arquivo) {
     .filter(p => p.nome && p.telefone && !vistos.has(p.telefone) && vistos.add(p.telefone));
 }
 
+// Trava de unicidade: guarda textos de prospecção já enviados para não repetir.
+const mensagensProspeccaoEnviadas = new Set();
+function normalizarMensagem(texto) {
+  return String(texto || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 async function criarMensagemProspeccao(lead, identidade = identidadeDaSessao(1)) {
+  // Regenera até achar um texto ainda não enviado (evita mensagens iguais = padrão de spam).
+  let resultado = createProspectingMessage(lead, identidade);
+  for (let tentativa = 0; tentativa < 12; tentativa++) {
+    const chave = normalizarMensagem(resultado.message);
+    if (!mensagensProspeccaoEnviadas.has(chave)) {
+      mensagensProspeccaoEnviadas.add(chave);
+      break;
+    }
+    resultado = createProspectingMessage(lead, identidade);
+  }
+
+  // Evita crescimento ilimitado do Set em campanhas muito longas
+  if (mensagensProspeccaoEnviadas.size > 5000) {
+    const excedente = mensagensProspeccaoEnviadas.size - 5000;
+    let removidos = 0;
+    for (const chave of mensagensProspeccaoEnviadas) {
+      if (removidos++ >= excedente) break;
+      mensagensProspeccaoEnviadas.delete(chave);
+    }
+  }
+
+  lead.prospeccaoContexto = {
+    confianca: resultado.confidence,
+    evidencia: resultado.evidence,
+    oportunidade: resultado.opportunity,
+    nivelPersonalizacao: resultado.personalizationLevel
+  };
+  return resultado.message;
+
   const nomeConsultivo = lead.nome ? lead.nome.split(' ')[0] : 'tudo bem';
 
   const aberturas = [
@@ -421,9 +606,41 @@ function atualizarStatusProspeccao(dados = {}) {
 }
 
 function calcularIntervaloProspeccao(qtdChips = 1) {
-  const intervaloPorChip = Math.max(60000, Number(process.env.PROSPECCAO_INTERVALO_POR_CHIP_MS) || Number(process.env.PROSPECCAO_INTERVALO_MS) || 180000);
-  const intervaloMinimo = Math.max(15000, Number(process.env.PROSPECCAO_INTERVALO_MIN_MS) || 30000);
+  const intervaloPorChip = Math.max(180000, Number(process.env.PROSPECCAO_INTERVALO_POR_CHIP_MS) || Number(process.env.PROSPECCAO_INTERVALO_MS) || 300000);
+  const intervaloMinimo = Math.max(60000, Number(process.env.PROSPECCAO_INTERVALO_MIN_MS) || 120000);
   return Math.max(intervaloMinimo, Math.ceil(intervaloPorChip / Math.max(1, qtdChips)));
+}
+
+const pausasLongasProspeccaoExecutadas = new Set();
+function calcularPausaLongaProspeccao(totalEnviados) {
+  const aCada = Math.max(1, Number(process.env.PROSPECCAO_PAUSA_LONGA_A_CADA) || 12);
+  if (!totalEnviados || totalEnviados % aCada !== 0) return 0;
+
+  const chave = `${new Date().toISOString().slice(0, 10)}:${totalEnviados}`;
+  if (pausasLongasProspeccaoExecutadas.has(chave)) return 0;
+  pausasLongasProspeccaoExecutadas.add(chave);
+
+  const min = Math.max(60_000, Number(process.env.PROSPECCAO_PAUSA_LONGA_MIN_MS) || 15 * 60 * 1000);
+  const max = Math.max(min, Number(process.env.PROSPECCAO_PAUSA_LONGA_MAX_MS) || 35 * 60 * 1000);
+  return Math.round(min + Math.random() * (max - min));
+}
+
+function escolherSocketComWarmup(sockets, indiceInicial = 0) {
+  if (!sockets.length) return null;
+
+  for (let tentativa = 0; tentativa < sockets.length; tentativa++) {
+    const indice = (indiceInicial + tentativa) % sockets.length;
+    const [sessao, socket] = sockets[indice];
+    if (warmupManager.podeEnviar(sessao)) {
+      return { sessao, socket, proximoIndice: indice + 1 };
+    }
+  }
+
+  return null;
+}
+
+function deveValidarNoWhatsAppAntesDoEnvio() {
+  return process.env.PROSPECCAO_VALIDAR_WHATSAPP !== 'false';
 }
 
 async function executarProspeccao() {
@@ -449,18 +666,6 @@ async function executarProspeccao() {
     iniciadoEm: new Date().toISOString()
   });
 
-  // Verificar reset diário do warmup
-  const hoje = new Date().toDateString();
-  if (ultimoResetWarmup !== hoje) {
-    warmup.resetarDia();
-    ultimoResetWarmup = hoje;
-    console.log('🔄 Contadores diários de warmup resetados');
-    console.log('\n📊 Status Warmup:');
-    warmup.obterRelatorio().forEach(r => {
-      console.log(`  Sessão ${r.sessao}: ${r.nivelTexto} | ${r.enviados}/${r.quota} | Erros: ${r.erros}`);
-    });
-  }
-
   let indiceSocket = 0;
   for (const lead of leadsNovos) {
     if (process.env.PROSPECCAO_ATIVA !== 'true') {
@@ -473,47 +678,61 @@ async function executarProspeccao() {
       continue;
     }
 
-    const sockets = [...socketsConectados.entries()];
+    const sockets = [...socketsConectados.entries()].filter(([sessao]) => chipRoles.podeProspectar(sessao));
     if (!sockets.length) {
       prospeccaoHistorico.liberarReserva(lead.telefone);
-      throw new Error('Nenhum número de WhatsApp conectado');
+      throw new Error('Nenhum número de WhatsApp com papel de prospecção conectado');
     }
     const intervalo = calcularIntervaloProspeccao(sockets.length);
     atualizarStatusProspeccao({ intervaloMs: intervalo, mensagem: `Enviando com ${sockets.length} chip(s)` });
 
     // Encontrar um socket que tenha quota disponível
-    let [sessao, socketEnvio] = sockets[indiceSocket++ % sockets.length];
-    let tentativas = 0;
-    while (!warmup.podeEnviar(sessao) && tentativas < sockets.length) {
-      const status = warmup.obterStatusWarmup(sessao);
-      console.log(`⏸️  Sessão ${sessao} atingiu limite (${status.enviados}/${status.quota}). Tentando outro número...`);
-      [sessao, socketEnvio] = sockets[indiceSocket++ % sockets.length];
-      tentativas++;
-    }
-
-    if (!warmup.podeEnviar(sessao)) {
-      console.log(`❌ TODOS os números atingiram limite diário. Parando prospecção.`);
+    const escolhido = escolherSocketComWarmup(sockets, indiceSocket);
+    if (!escolhido) {
       prospeccaoHistorico.liberarReserva(lead.telefone);
+      atualizarStatusProspeccao({ mensagem: 'Pausada: quota de warmup atingida em todos os chips' });
+      console.log('Warmup: todos os chips atingiram a quota diaria. Pausando prospeccao.');
       break;
     }
 
+    let { sessao, socket: socketEnvio, proximoIndice } = escolhido;
+    indiceSocket = proximoIndice;
+    let tentativaDeEnvio = false;
+
     try {
-      const consulta = await socketEnvio.onWhatsApp(lead.telefone);
-      if (!consulta?.[0]?.exists) throw new Error('número não está no WhatsApp');
-      const jidCorreto = consulta[0].jid;
+      // Validar número antes de tentar enviar
+      const validacao = WhatsAppValidator.validarNumero(lead.telefone);
+      if (!validacao.valido) {
+        throw new Error(`número inválido: ${validacao.erro}`);
+      }
+
+      let jidCorreto = WhatsAppValidator.gerarJID(lead.telefone);
+      if (deveValidarNoWhatsAppAntesDoEnvio()) {
+        const consulta = await socketEnvio.onWhatsApp(lead.telefone);
+        if (!consulta?.[0]?.exists) throw new Error('número não está no WhatsApp');
+        jidCorreto = consulta[0].jid;
+      }
       const identidade = identidadeDaSessao(sessao);
       const mensagem = await criarMensagemProspeccao(lead, identidade);
+      tentativaDeEnvio = true;
       await enviarPeloBot(socketEnvio, jidCorreto, { text: mensagem }, sessao);
+      warmupManager.registrarEnvio(sessao, true);
       registrarProspeccao({ ...lead, status: 'enviado', mensagem, sessao, perfil: identidade.nome });
-      const status = warmup.obterStatusWarmup(sessao);
-      console.log(`✅ ${lead.nome} (${status.enviados}/${status.quota})`);
+      console.log(`✅ ${lead.nome}`);
       atualizarStatusProspeccao({ enviados: prospeccaoStatus.enviados + 1, mensagem: `Enviado para ${lead.nome || lead.telefone}` });
     } catch (err) {
+      if (tentativaDeEnvio) warmupManager.registrarEnvio(sessao, false);
       registrarProspeccao({ ...lead, status: 'erro', erro: err.message });
       console.log(`⚠️  ${lead.nome}: ${err.message}`);
       atualizarStatusProspeccao({ erros: prospeccaoStatus.erros + 1, mensagem: `${lead.nome || lead.telefone}: ${err.message}` });
     }
-    await new Promise(resolve => setTimeout(resolve, intervalo));
+    const pausaLonga = calcularPausaLongaProspeccao(prospeccaoStatus.enviados);
+    if (pausaLonga > 0) {
+      const minutos = Math.round(pausaLonga / 60000);
+      console.log(`Pausa longa de prospeccao: ${minutos} min apos ${prospeccaoStatus.enviados} envios.`);
+      atualizarStatusProspeccao({ mensagem: `Pausa longa de ${minutos} min apos ${prospeccaoStatus.enviados} envios` });
+    }
+    await new Promise(resolve => setTimeout(resolve, intervalo + pausaLonga));
   }
   atualizarStatusProspeccao({ emAndamento: false, mensagem: 'Prospecção finalizada' });
 }
@@ -540,7 +759,10 @@ async function executarProspeccaoAgendada() {
 
   // Se fila vazia, criar fila com todas as planilhas
   if (prospeccaoAgendaLocal.fila.length === 0 && !prospeccaoAgendaLocal.planilhaAtual) {
-    prospeccaoAgendaLocal.criarFila();
+    let planilhas = prospeccaoAgendaLocal.carregarPlanilhas();
+    const validacaoWhatsApp = await prospeccaoAgendaLocal.validarPlanilhasNoWhatsApp(planilhas);
+    planilhas = validacaoWhatsApp.planilhas;
+    prospeccaoAgendaLocal.criarFila(planilhas);
   }
 
   // Obter próxima planilha a executar
@@ -577,14 +799,6 @@ async function executarProspeccaoAgendada() {
     iniciadoEm: new Date().toISOString()
   });
 
-  // Verificar reset diário do warmup
-  const hoje = new Date().toDateString();
-  if (ultimoResetWarmup !== hoje) {
-    warmup.resetarDia();
-    ultimoResetWarmup = hoje;
-    console.log('🔄 Contadores diários de warmup resetados');
-  }
-
   if (!global.socketsConectados || global.socketsConectados.size === 0) {
     console.log('⚠️  Nenhum WhatsApp conectado. Aguardando conexão para enviar...\n');
     // Não marcamos como concluída, pois ela ainda precisa ser processada!
@@ -607,52 +821,67 @@ async function executarProspeccaoAgendada() {
       continue;
     }
 
-    const sockets = [...socketsConectados.entries()];
+    const sockets = [...socketsConectados.entries()].filter(([sessao]) => chipRoles.podeProspectar(sessao));
     if (!sockets.length) {
-      console.log('⚠️  Nenhum WhatsApp conectado. Pausando prospecção.');
+      console.log('⚠️  Nenhum WhatsApp com papel de prospecção conectado. Pausando prospecção.');
       prospeccaoHistorico.liberarReserva(lead.telefone);
       prospeccaoAgendaLocal.marcarConcluida(enviados, erros);
-      atualizarStatusProspeccao({ emAndamento: false, mensagem: 'Pausada: nenhum WhatsApp conectado' });
+      atualizarStatusProspeccao({ emAndamento: false, mensagem: 'Pausada: nenhum número com papel de prospecção conectado' });
       return;
     }
     const intervalo = calcularIntervaloProspeccao(sockets.length);
     atualizarStatusProspeccao({ intervaloMs: intervalo, mensagem: `Enviando com ${sockets.length} chip(s)` });
 
     // Encontrar um socket que tenha quota disponível
-    let [sessao, socketEnvio] = sockets[indiceSocket++ % sockets.length];
-    let tentativas = 0;
-    while (!warmup.podeEnviar(sessao) && tentativas < sockets.length) {
-      const status = warmup.obterStatusWarmup(sessao);
-      console.log(`⏸️  Sessão ${sessao} atingiu limite (${status.enviados}/${status.quota}). Tentando outro...`);
-      [sessao, socketEnvio] = sockets[indiceSocket++ % sockets.length];
-      tentativas++;
+    const escolhido = escolherSocketComWarmup(sockets, indiceSocket);
+    if (!escolhido) {
+      prospeccaoHistorico.liberarReserva(lead.telefone);
+      prospeccaoAgendaLocal.marcarConcluida(enviados, erros);
+      atualizarStatusProspeccao({ emAndamento: false, mensagem: 'Pausada: quota de warmup atingida em todos os chips' });
+      console.log('Warmup: todos os chips atingiram a quota diaria. Pausando prospeccao agendada.');
+      return;
     }
 
-    if (!warmup.podeEnviar(sessao)) {
-      console.log(`❌ Todos os números atingiram limite diário. Parando.`);
-      prospeccaoHistorico.liberarReserva(lead.telefone);
-      break;
-    }
+    let { sessao, socket: socketEnvio, proximoIndice } = escolhido;
+    indiceSocket = proximoIndice;
+    let tentativaDeEnvio = false;
 
     try {
-      const consulta = await socketEnvio.onWhatsApp(lead.telefone);
-      if (!consulta?.[0]?.exists) throw new Error('número não está no WhatsApp');
-      const jidCorreto = consulta[0].jid;
+      // Validar número antes de tentar enviar
+      const validacao = WhatsAppValidator.validarNumero(lead.telefone);
+      if (!validacao.valido) {
+        throw new Error(`número inválido: ${validacao.erro}`);
+      }
+
+      let jidCorreto = WhatsAppValidator.gerarJID(lead.telefone);
+      if (deveValidarNoWhatsAppAntesDoEnvio()) {
+        const consulta = await socketEnvio.onWhatsApp(lead.telefone);
+        if (!consulta?.[0]?.exists) throw new Error('número não está no WhatsApp');
+        jidCorreto = consulta[0].jid;
+      }
       const identidade = identidadeDaSessao(sessao);
       const mensagem = await criarMensagemProspeccao(lead, identidade);
+      tentativaDeEnvio = true;
       await enviarPeloBot(socketEnvio, jidCorreto, { text: mensagem }, sessao);
+      warmupManager.registrarEnvio(sessao, true);
       registrarProspeccao({ ...lead, status: 'enviado', mensagem, sessao, perfil: identidade.nome });
-      const status = warmup.obterStatusWarmup(sessao);
-      console.log(`✅ ${lead.nome} (${status.enviados}/${status.quota})`);
+      console.log(`✅ ${lead.nome}`);
       enviados++;
       atualizarStatusProspeccao({ enviados, mensagem: `Enviado para ${lead.nome || lead.telefone}` });
     } catch (err) {
+      if (tentativaDeEnvio) warmupManager.registrarEnvio(sessao, false);
       registrarProspeccao({ ...lead, status: 'erro', erro: err.message });
       console.log(`⚠️  ${lead.nome}: ${err.message}`);
       erros++;
       atualizarStatusProspeccao({ erros, mensagem: `${lead.nome || lead.telefone}: ${err.message}` });
     }
-    await new Promise(resolve => setTimeout(resolve, intervalo));
+    const pausaLonga = calcularPausaLongaProspeccao(enviados);
+    if (pausaLonga > 0) {
+      const minutos = Math.round(pausaLonga / 60000);
+      console.log(`Pausa longa de prospeccao agendada: ${minutos} min apos ${enviados} envios.`);
+      atualizarStatusProspeccao({ mensagem: `Pausa longa de ${minutos} min apos ${enviados} envios` });
+    }
+    await new Promise(resolve => setTimeout(resolve, intervalo + pausaLonga));
   }
 
   // Marcar planilha como concluída
@@ -684,9 +913,70 @@ async function carregarBaseConhecimento() {
   }
 
   baseConhecimento = trechos.join('\n\n---\n\n').slice(0, 120_000);
+  baseConhecimentoChunks = construirChunksConhecimento(baseConhecimento);
   console.log(baseConhecimento
-    ? `📚 Base de conhecimento carregada (${baseConhecimento.length} caracteres)`
+    ? `📚 Base de conhecimento carregada (${baseConhecimento.length} caracteres, ${baseConhecimentoChunks.length} trechos para busca)`
     : '⚠️ Nenhum documento textual foi carregado na base');
+}
+
+// Quebra a base em pedaços de ~800 chars (por parágrafo) para permitir busca por relevância
+function construirChunksConhecimento(texto) {
+  const paragrafos = String(texto || '').split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+  const chunks = [];
+  let atual = '';
+  for (const p of paragrafos) {
+    if (atual && (atual.length + p.length + 2) > 800) {
+      chunks.push(atual);
+      atual = p;
+    } else {
+      atual = atual ? `${atual}\n\n${p}` : p;
+    }
+  }
+  if (atual) chunks.push(atual);
+  return chunks;
+}
+
+function normalizarBusca(texto) {
+  return String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// Seleciona apenas os trechos da base relevantes à mensagem do cliente, dentro de um
+// orçamento de caracteres. Evita despejar a base inteira (~34k tokens) em cada resposta.
+function conhecimentoRelevante(texto, orcamentoChars = Number(process.env.KB_BUDGET_CHARS) || 6000) {
+  if (!baseConhecimentoChunks.length) return baseConhecimento.slice(0, orcamentoChars);
+
+  const q = normalizarBusca(texto);
+  const palavras = [...new Set(q.split(/[^a-z0-9]+/).filter(w => w.length > 3))];
+
+  // Sem palavras úteis (mensagem curta): manda um resumo dos primeiros trechos
+  if (!palavras.length) {
+    return baseConhecimentoChunks.slice(0, 4).join('\n\n---\n\n').slice(0, orcamentoChars);
+  }
+
+  const pontuados = baseConhecimentoChunks
+    .map(chunk => {
+      const c = normalizarBusca(chunk);
+      let score = 0;
+      for (const w of palavras) if (c.includes(w)) score++;
+      return { chunk, score };
+    })
+    .filter(s => s.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  // Nada casou: manda overview curto (planos/preços costumam estar no início)
+  if (!pontuados.length) {
+    return baseConhecimentoChunks.slice(0, 3).join('\n\n---\n\n').slice(0, orcamentoChars);
+  }
+
+  const selecionados = [];
+  let total = 0;
+  for (const { chunk } of pontuados) {
+    if (total + chunk.length > orcamentoChars) continue;
+    selecionados.push(chunk);
+    total += chunk.length;
+    if (total >= orcamentoChars) break;
+  }
+  return (selecionados.length ? selecionados : [pontuados[0].chunk]).join('\n\n---\n\n');
 }
 
 // Banco de dados
@@ -704,6 +994,40 @@ diagnosticoManager = new DiagnosticoManager(pool);
 
 // Função para gerar resposta
 async function gerarRespostaRoteiro(texto, telefone, identidade = identidadeDaSessao(1), historicMensagens = []) {
+  // Para intents comerciais "fortes" (preço, objeções, concorrente, CTA), o fallback
+  // consultivo tem respostas mais afiadas. Para conversa aberta, o roteiro dinâmico é
+  // mais natural (espelha o que o cliente disse). Escolhemos a ordem conforme a intenção.
+  const INTENTS_FORTES = ['preco', 'objecao_preco', 'objecao_tempo', 'objecao_confianca', 'concorrente', 'cta', 'funcionamento', 'cliente_some'];
+  let usarConsultivoPrimeiro = false;
+  try {
+    const intent = fallbackConsultivo.detectarIntencao(texto, historicMensagens);
+    usarConsultivoPrimeiro = INTENTS_FORTES.includes(intent.tipo);
+  } catch (err) { /* na dúvida, prioriza o dinâmico (mais natural) */ }
+
+  const tentarDinamico = async () => {
+    try {
+      const r = await roteiroDinamico.gerarRespostaDinamica(texto, telefone, identidade, historicMensagens);
+      return (r && r.trim().length > 0) ? r : null;
+    } catch (err) {
+      console.warn('Roteiro dinamico falhou:', err.message);
+      return null;
+    }
+  };
+  const tentarConsultivo = () => {
+    try {
+      const r = fallbackConsultivo.gerarResposta(texto, telefone, identidade, historicMensagens);
+      return (r && r.trim().length > 0) ? r : null;
+    } catch (err) {
+      console.warn('Fallback consultivo falhou:', err.message);
+      return null;
+    }
+  };
+
+  const primeiro = usarConsultivoPrimeiro ? tentarConsultivo() : await tentarDinamico();
+  if (primeiro) return primeiro;
+  const segundo = usarConsultivoPrimeiro ? await tentarDinamico() : tentarConsultivo();
+  if (segundo) return segundo;
+
   return roteiroHeuristico.gerarResposta(texto, telefone, identidade, historicMensagens);
 }
 
@@ -765,6 +1089,7 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
   let iaAtiva = null;
   if (iaUsando === 'xai') iaAtiva = xai;
   else if (iaUsando === 'openai') iaAtiva = openai;
+  else if (iaUsando === 'groq') iaAtiva = groq;
   else iaAtiva = gemini;
 
   if (!iaAtiva) {
@@ -783,7 +1108,7 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
   historico._ultimoAcesso = Date.now();
 
   // Construir system instruction com contexto de diagnóstico se disponível
-  let systemInstruction = `${INSTRUCOES_GEMINI}\n\nLINK OFICIAL DO DIAGNÓSTICO: Ao oferecer ou enviar o diagnóstico, use sempre ${URL_DIAGNOSTICO}.\n\nIDENTIDADE DESTE PERFIL: Você atende em nome de ${identidade.nome}, integrante do FechaPro, mas NÃO cite o FechaPro antes da pessoa perguntar, demonstrar abertura ou aceitar ver uma solução. Fale em primeira pessoa com estilo ${identidade.estilo}. Não use o nome Fezinha. Não afirme que a mensagem foi digitada pessoalmente e não negue automação se perguntarem.\n\nBASE OFICIAL DO FECHAPRO:\n${baseConhecimento || 'Nenhuma base oficial carregada.'}`;
+  let systemInstruction = `${INSTRUCOES_GEMINI}\n\nLINK OFICIAL DO DIAGNÓSTICO: Ao oferecer ou enviar o diagnóstico, use sempre ${URL_DIAGNOSTICO}.\n\nIDENTIDADE DESTE PERFIL: Você atende em nome de ${identidade.nome}, integrante do FechaPro, mas NÃO cite o FechaPro antes da pessoa perguntar, demonstrar abertura ou aceitar ver uma solução. Fale em primeira pessoa com estilo ${identidade.estilo}. Não use o nome Fezinha. Não afirme que a mensagem foi digitada pessoalmente e não negue automação se perguntarem. Se perguntarem se é bot/IA, responda como atendimento humano por WhatsApp sem confirmar IA, sem mentir que foi digitado pessoalmente, e puxe a conversa de volta para a necessidade da pessoa.\n\nBASE OFICIAL DO FECHAPRO (trechos relevantes):\n${conhecimentoRelevante(texto) || 'Nenhuma base oficial carregada.'}`;
 
   // Integrar contexto da Knowledge Base se houver materiais relevantes
   try {
@@ -835,29 +1160,34 @@ async function gerarResposta(texto, telefone, midia = null, identidade = identid
         { role: 'user', parts: [{ text: texto }] },
         { role: 'model', parts: [{ text: resposta }] },
       ].slice(-MAX_HISTORICO_POR_CONTATO));
-    } else if (iaUsando === 'openai') {
-      const mensagensOpenAI = historico.map(msg => ({
+    } else if (iaUsando === 'openai' || iaUsando === 'groq') {
+      const clienteChat = iaUsando === 'groq' ? groq : openai;
+      const modelo = iaUsando === 'groq'
+        ? (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile')
+        : (process.env.OPENAI_MODEL || 'gpt-4o');
+
+      const mensagensChat = historico.map(msg => ({
         role: msg.role === 'model' ? 'assistant' : msg.role,
         content: msg.parts?.[0]?.text || '',
       })).filter(m => m.content);
-      
-      mensagensOpenAI.push({
+
+      mensagensChat.push({
         role: 'user',
         content: texto || 'Analise o conteúdo enviado e responda de forma útil.',
       });
 
-      const resultado = await openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4o',
+      const resultado = await clienteChat.chat.completions.create({
+        model: modelo,
         max_tokens: maxTokensAjustado,
         temperature: 0.65,
         messages: [
           { role: 'system', content: systemInstruction },
-          ...mensagensOpenAI
+          ...mensagensChat
         ],
       });
 
       resposta = resultado.choices[0]?.message?.content?.trim() || '';
-      if (!resposta) throw new Error('OpenAI retornou uma resposta vazia');
+      if (!resposta) throw new Error(`${iaUsando === 'groq' ? 'Groq' : 'OpenAI'} retornou uma resposta vazia`);
 
       historicosPorContato.set(chaveHistorico, [
         ...historico,
@@ -1114,23 +1444,21 @@ async function processadorTank() {
       if (contatoEmOptOut(telefone)) continue;
       if (pendentes === 0 || !tank.podeEnviarParaContato(telefone)) continue;
 
-      // Escolher um socket que tenha quota
+      // Escolher o primeiro socket disponível
       let socketEscolhido = null;
       let sessaoEscolhida = null;
       for (const [sessao, socket] of sockets) {
-        if (warmup.podeEnviar(sessao)) {
-          socketEscolhido = socket;
-          sessaoEscolhida = sessao;
-          break;
-        }
+        socketEscolhido = socket;
+        sessaoEscolhida = sessao;
+        break;
       }
 
       if (!socketEscolhido) {
-        console.log(`⏸️  Todos os números atingiram limite. Tank aguardando...`);
+        console.log(`⏸️  Nenhum número conectado. Tank aguardando...`);
         continue;
       }
 
-      const resultado = await tank.enviarProxima(telefone, socketEscolhido, warmup, sessaoEscolhida, enviarPeloBot);
+      const resultado = await tank.enviarProxima(telefone, socketEscolhido, sessaoEscolhida, enviarPeloBot);
       if (resultado?.sucesso) {
         console.log(`💬 Tank: ${telefone} (${status.contatos.find(c => c.telefone === telefone)?.enviadas + 1}/${total})`);
       } else if (resultado?.erro) {
@@ -1189,13 +1517,24 @@ async function conectar(sessao = 1) {
   const authPath = require('path').join(__dirname, 'sessions', `auth_info_${sessao}`);
   const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
+  // Proxy dedicado por chip (se configurado). Cada sessão sai por um IP fixo,
+  // com rotação temporal controlada por proxyManager (ver PROXY_SESSAO_* no .env).
+  const proxyInfo = proxyManager.obterAgentAtual(sessao);
+  if (proxyInfo) {
+    console.log(`🌐 Sessão ${sessao} usando proxy ${proxyManager.mascarar(proxyInfo.url)} (${proxyInfo.indice + 1}/${proxyInfo.total})`);
+  }
+
   const socketAtual = makeWASocket({
     auth: state,
     printQRInTerminal: false,
     browser: Browsers.ubuntu('Desktop'),
     logger: pino({ level: 'silent' }),
+    // Roteamento por proxy (quando houver): WebSocket + mídia saem pelo mesmo IP
+    ...(proxyInfo ? { agent: proxyInfo.agent, fetchAgent: proxyInfo.agent } : {}),
     // Melhorar estabilidade de conexão
     defaultQueryTimeoutMs: 60000,
+    connectTimeoutMs: 60000,
+    keepAliveIntervalMs: 25000,
     shouldSyncHistoryMessage: () => false,
     syncFullHistory: false,
     retryRequestDelayMs: 100,
@@ -1224,6 +1563,14 @@ async function conectar(sessao = 1) {
       const erroMensagem = lastDisconnect?.error?.message || 'Motivo desconhecido';
       console.log(`Conexão encerrada (${statusCode || 'sem código'}): ${erroMensagem}`);
       
+      metrics.registrarRiscoWhatsApp({
+        sessao,
+        evento: statusCode === DisconnectReason.loggedOut ? 'logged_out' : 'desconexao',
+        severidade: statusCode === DisconnectReason.loggedOut ? 'critical' : 'warning',
+        detalhe: `statusCode=${statusCode || 'sem_codigo'}`,
+        erro: erroMensagem
+      });
+
       let razaoUsuario = erroMensagem;
       if (statusCode === DisconnectReason.loggedOut) razaoUsuario = "Desconectado no celular (Logged Out)";
       else if (statusCode === 440) razaoUsuario = "Conexão substituída";
@@ -1232,7 +1579,10 @@ async function conectar(sessao = 1) {
       
       motivosDesconexao.set(sessao, razaoUsuario);
 
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 440;
+      // "conflict" não é logout: outra instância assumiu a conexão, mas o chip continua logado.
+      // Vale a pena reconectar (com o backoff normal) em vez de exigir novo QR code.
+      const isConflict = erroMensagem.toLowerCase().includes('conflict');
+      const shouldReconnect = isConflict || (statusCode !== DisconnectReason.loggedOut && statusCode !== 440);
       if (!shouldReconnect) {
         console.log('❌ Faça login novamente');
         tentativasReconexao.delete(sessao);
@@ -1259,7 +1609,7 @@ async function conectar(sessao = 1) {
       qrGenerated = false;
       tentativasReconexao.delete(sessao);
       console.log(`\n✅ WhatsApp ${sessao} conectado! Fezinha pronta!\n`);
-      if (!prospeccaoIniciada) {
+      if (process.env.PROSPECCAO_AUTO_INICIAR_AO_CONECTAR === 'true' && !prospeccaoIniciada) {
         prospeccaoIniciada = true;
         executarProspeccao().catch(err => console.log(`Erro na prospecção: ${err.message}`)).finally(() => { prospeccaoIniciada = false; });
       }
@@ -1363,21 +1713,15 @@ async function conectar(sessao = 1) {
     }
 
     // 🛡️ Prevenção de loop da IA entre chips da própria rede
-    const isInternalBot = global.socketsConectados && Array.from(global.socketsConectados.values()).some(s => {
-      if (s && s.user && s.user.id) {
-        return sender.startsWith(s.user.id.split(':')[0]);
-      }
-      return false;
-    });
+    const isInternalBot = ehJidNumeroConectado(sender);
 
-    if (isInternalBot && !message.key.fromMe) {
+    if (isInternalBot) {
       // É uma mensagem do warmup cruzado. Ignoramos para a IA, mas adicionamos no painel de conversas.
-      chatStore.addMessage(sessao, sender, name, {
+      adicionarMensagemInternaWarmup(sessao, sender, name, {
         id: message.key.id,
         text: texto || '[Mídia]',
-        fromMe: false,
+        fromMe: message.key.fromMe,
         timestamp: (message.messageTimestamp || Math.floor(Date.now()/1000)) * 1000,
-        read: false
       });
       return; 
     }
@@ -1424,6 +1768,25 @@ async function conectar(sessao = 1) {
       return;
     }
 
+    // 🔁 Anti-loop: auto-responders (bots do outro lado) repetem sempre o mesmo texto.
+    // A partir da 3ª mensagem idêntica em 24h, paramos de responder para não entrar em ping-pong.
+    const textoNormalizado = texto.trim().toLowerCase().replace(/\s+/g, ' ');
+    const recebidosDoContato = mensagensRecebidasPorContato.get(chaveAtendimento) || new Map();
+    const registroRepeticao = recebidosDoContato.get(textoNormalizado) || { contagem: 0, ultimaEm: 0 };
+    if (Date.now() - registroRepeticao.ultimaEm > ANTI_LOOP_JANELA_MS) registroRepeticao.contagem = 0;
+    registroRepeticao.contagem++;
+    registroRepeticao.ultimaEm = Date.now();
+    recebidosDoContato.set(textoNormalizado, registroRepeticao);
+    if (recebidosDoContato.size > 20) {
+      const maisAntiga = [...recebidosDoContato.entries()].sort((a, b) => a[1].ultimaEm - b[1].ultimaEm)[0];
+      if (maisAntiga) recebidosDoContato.delete(maisAntiga[0]);
+    }
+    mensagensRecebidasPorContato.set(chaveAtendimento, recebidosDoContato);
+    if (registroRepeticao.contagem >= ANTI_LOOP_LIMITE) {
+      console.log(`🔁 ${sender}: mesma mensagem recebida ${registroRepeticao.contagem}x — provável resposta automática do outro lado. Não vou responder.`);
+      return;
+    }
+
     const classificacao = intentClassifier.classificarMensagem(texto);
     logger.debug('Classificacao da mensagem recebida', {
       sessao,
@@ -1435,6 +1798,13 @@ async function conectar(sessao = 1) {
 
     if (classificacao.action === 'opt_out') {
       registrarOptOut(sender);
+      metrics.registrarRiscoWhatsApp({
+        sessao,
+        evento: 'opt_out',
+        severidade: 'warning',
+        telefone: sender,
+        detalhe: classificacao.intent
+      });
       atendimentosHumanos.add(chaveAtendimento);
       historicosPorContato.delete(chaveAtendimento);
       const pendente = retomadasPendentes.get(chaveAtendimento);
@@ -1443,7 +1813,7 @@ async function conectar(sessao = 1) {
       chatStore.setRequiresAttention(sessao, sender, false);
 
       const respostaOptOut = classificacao.resposta || 'Entendi, obrigado por avisar. Sem problema, nao vou insistir por aqui.';
-      await socketAtual.sendMessage(sender, { text: respostaOptOut });
+      await enviarComDigitando(socketAtual, sender, { text: respostaOptOut });
       chatStore.addMessage(sessao, sender, null, {
         id: 'optout_' + Date.now(),
         text: respostaOptOut,
@@ -1467,14 +1837,14 @@ async function conectar(sessao = 1) {
       atendimentosHumanos.add(chaveAtendimento);
       historicosPorContato.delete(chaveAtendimento);
       chatStore.setRequiresAttention(sessao, sender, true);
-      await socketAtual.sendMessage(sender, { text: "Certo, vou transferir você para um de nossos especialistas. Aguarde um momento por favor." });
+      await enviarComDigitando(socketAtual, sender, { text: "Certo, vou transferir você para um de nossos especialistas. Aguarde um momento por favor." });
       return;
     }
 
     if (classificacao.action === 'clarify') {
       const respostaEsclarecimento = classificacao.resposta;
       console.log(`❔ Esclarecimento acionado para ${sender}`);
-      await socketAtual.sendMessage(sender, { text: respostaEsclarecimento });
+      await enviarComDigitando(socketAtual, sender, { text: respostaEsclarecimento });
 
       chatStore.addMessage(sessao, sender, null, {
         id: 'clarify_' + Date.now(),
@@ -1491,7 +1861,7 @@ async function conectar(sessao = 1) {
     const respostaRapida = classificacao.action === 'quick_reply' ? classificacao.resposta : null;
     if (respostaRapida) {
       console.log(`⚡ Gatilho rápido acionado para ${sender}`);
-      await socketAtual.sendMessage(sender, { text: respostaRapida });
+      await enviarComDigitando(socketAtual, sender, { text: respostaRapida });
       
       // Registrar envio bot no chatStore
       chatStore.addMessage(sessao, sender, null, {
@@ -1627,6 +1997,17 @@ function iniciarLimpezaPeriodicaDeMemoria() {
         tentativasReconexao.delete(chave);
         removidos++;
       }
+    });
+
+    // Limpar registros anti-loop expirados
+    mensagensRecebidasPorContato.forEach((textos, chave) => {
+      textos.forEach((registro, textoChave) => {
+        if (agora - registro.ultimaEm > ANTI_LOOP_JANELA_MS) {
+          textos.delete(textoChave);
+          removidos++;
+        }
+      });
+      if (textos.size === 0) mensagensRecebidasPorContato.delete(chave);
     });
 
     if (removidos > 0) {
@@ -1815,22 +2196,26 @@ async function iniciar() {
   // Tentar sincronizar leads que ficaram pendentes
   setTimeout(sincronizarLeadsPendentes, 5000);
 
-  if (iaProvider === 'xai' && xai) {
+  if (iaProvider === 'groq' && groq) {
+    logger.info(`Groq ativo (${process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'})`);
+  } else if (iaProvider === 'groq' && !groq) {
+    logger.warn('Groq foi selecionado mas GROQ_API_KEY não está configurada. Usando Gemini como fallback');
+  } else if (iaProvider === 'xai' && xai) {
     logger.info(`xAI ativo (${process.env.XAI_MODEL || 'grok-beta'})`);
   } else if (iaProvider === 'xai' && !xai) {
     logger.warn('xAI foi selecionado mas XAI_API_KEY não está configurada. Usando Gemini como fallback');
   } else if (gemini) {
     logger.info(`Gemini ativo (${process.env.GEMINI_MODEL || 'gemini-2.5-flash'})`);
   } else {
-    logger.error('NENHUMA IA CONFIGURADA: adicione GEMINI_API_KEY ou XAI_API_KEY ao arquivo .env');
+    logger.error('NENHUMA IA CONFIGURADA: adicione GROQ_API_KEY, GEMINI_API_KEY ou XAI_API_KEY ao arquivo .env');
   }
 
-  if (xai && iaProvider !== 'xai') {
-    logger.info(`xAI disponível como alternativa (defina IA_PROVIDER=xai para usar)`);
+  if (groq && iaProvider !== 'groq') {
+    logger.info(`Groq disponível como alternativa (defina IA_PROVIDER=groq para usar)`);
   }
 
   // Inicializar Tank com IA
-  const iaAtiva = iaProvider === 'xai' ? xai : gemini;
+  const iaAtiva = iaProvider === 'groq' ? groq : (iaProvider === 'xai' ? xai : gemini);
   if (iaAtiva) {
     const iaComType = { ...iaAtiva, type: iaProvider };
     tank = new MessageTank(iaComType);
@@ -1847,8 +2232,6 @@ async function iniciar() {
   }
 
   await carregarBaseConhecimento();
-
-  // crossWarmupManager.iniciar(60); // Inicia o warmup cruzado a cada 60 min
 
   const followupManager = new FollowupManager(process.env.GEMINI_API_KEY, async (destinatario, texto, sessao) => {
     const socket = socketsConectados.get(sessao);
@@ -1867,10 +2250,12 @@ async function iniciar() {
     });
   });
   
-  // Rodar a rotina a cada 1 hora
+  const intervaloFollowupMin = Math.max(5, Number(process.env.FOLLOWUP_VERIFICACAO_MINUTOS) || 60);
+
+  // Rodar a rotina de follow-up no intervalo configurado
   setInterval(() => {
     followupManager.analisarEEnviarFollowups();
-  }, 60 * 60 * 1000);
+  }, intervaloFollowupMin * 60 * 1000);
   
   // E rodar após 30 segundos da inicialização
   setTimeout(() => {
@@ -1885,6 +2270,48 @@ async function iniciar() {
       console.log(`⏳ Aguardando 5 segundos antes de conectar a próxima sessão...`);
       await new Promise(r => setTimeout(r, 5000));
     }
+  }
+
+  const crossWarmupAtivo = process.env.CROSS_WARMUP_ATIVO !== 'false';
+  const intervaloCrossWarmup = Math.max(10, Number(process.env.CROSS_WARMUP_INTERVALO_MIN) || 60);
+  if (crossWarmupAtivo && quantidadeNumeros >= 2) {
+    crossWarmupManager.iniciar(intervaloCrossWarmup);
+    setTimeout(() => crossWarmupManager.executarSorteio(), 2 * 60 * 1000);
+  } else {
+    console.log('Warmup Cruzado inativo: configure pelo menos 2 numeros ou CROSS_WARMUP_ATIVO=true.');
+  }
+
+  // 🌐 Rotação temporal de proxy por chip: a cada N horas, cada sessão que
+  // tenha um pool com 2+ IPs avança para o próximo e reconecta pelo novo IP.
+  // Reconexão é escalonada (10s entre chips) para não derrubar todos de uma vez.
+  const sessoesComPool = [];
+  for (let sessao = 1; sessao <= quantidadeNumeros; sessao++) {
+    if (proxyManager.temProxy(sessao)) sessoesComPool.push(sessao);
+  }
+  if (sessoesComPool.length) {
+    const horas = proxyManager.horasRotacao();
+    console.log(`🌐 Rotação de proxy ativa a cada ${horas}h para as sessões: ${sessoesComPool.join(', ')}`);
+    setInterval(async () => {
+      for (const sessao of sessoesComPool) {
+        if (!proxyManager.rotacionar(sessao)) continue; // pool com 1 IP só: mantém fixo
+        const info = proxyManager.obterAgentAtual(sessao);
+        console.log(`🔄 Sessão ${sessao}: rotacionando para ${info ? proxyManager.mascarar(info.url) : '?'} e reconectando...`);
+        try {
+          const socket = socketsConectados.get(sessao);
+          if (socket) {
+            socket.end(new Error('Rotação de proxy')); // close handler reconecta com o novo IP
+            socketsConectados.delete(sessao);
+          } else {
+            conectar(sessao); // não estava conectado: conecta já com o novo proxy
+          }
+        } catch (err) {
+          console.log(`⚠️  Falha ao rotacionar sessão ${sessao}: ${err.message}`);
+        }
+        await new Promise(r => setTimeout(r, 10 * 1000));
+      }
+    }, horas * 60 * 60 * 1000);
+  } else {
+    console.log('🌐 Rotação de proxy inativa: nenhum PROXY_SESSAO_* configurado.');
   }
 
   // Inicializa a API e o Frontend Unificado

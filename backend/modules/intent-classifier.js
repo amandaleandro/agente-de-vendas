@@ -1,7 +1,7 @@
 const RESPOSTAS_RAPIDAS = [
   {
     regex: /^(planos?|precos?|preços?|valores|quanto custa|qual o valor|qual o preco|qual o preço)$/i,
-    resposta: 'Consigo te passar, sim. Antes, pra nao te mandar algo fora do seu caso: voce hoje envia quantos orcamentos por semana?'
+    resposta: 'Consigo te passar, sim. Antes de falar plano, me diz uma coisa: voce quer resolver mais a criacao da proposta ou o acompanhamento depois que envia?'
   },
   {
     regex: /^(diagnostico|diagnóstico)$/i,
@@ -32,7 +32,9 @@ const PADROES_DESINTERESSE = [
   /\bn[aã]o\s+me\s+interessa\b/i,
   /\bn[aã]o\s+(preciso|precisamos)\b/i,
   /\bn[aã]o\s+serve\b/i,
-  /\bagora\s+n[aã]o\b/i,
+  /\bagora\s+n[aã]o\s*(,|\.)?\s*(obrigad[oa]|valeu|vlw)\b/i,
+  /\bn[aã]o\s+[eé]\s+(prioridade|pra\s+mim|para\s+mim)\b/i,
+  /\bn[aã]o\s+faz\s+sentido\s+(pra|para)\s+(mim|n[oó]s|a\s+gente)\b/i,
   /\b(outra|pr[oó]xima)\s+hora\b/i,
   /\bfica\s+(pra|para)\s+(uma\s+)?(outra|pr[oó]xima)\s+hora\b/i,
   /\bn[aã]o\s+(damos|dou|estamos\s+dando)\s+conta\b/i,
@@ -47,7 +49,15 @@ const PADROES_DESINTERESSE = [
   /\bremova\s+(meu\s+)?(contato|n[uú]mero)\b/i,
   /\bme\s+tira\s+da\s+lista\b/i,
   /\bdescadastre\b/i,
-  /\bcancelar\s+(mensagens|contato)\b/i
+  /\bcancelar\s+(mensagens|contato)\b/i,
+  // Encerramento educado / fora do perfil de cliente
+  /\bvou\s+encerrar\b/i,
+  /\bencerr(ar|o|ando)\s+(nosso\s+)?(contato|atendimento|por\s+aqui)\b/i,
+  /\b(atend(o|emos|imento)|trabalh(o|amos)|foco?|focad[oa]s?)\s+(apenas|somente|exclusivamente|so)\b/i,
+  /\b(somos|sou)\s+focad[oa]s?\s+(apenas|somente|exclusivamente|em)\b/i,
+  /\bn[aã]o\s+(trabalho|trabalhamos|atendo|atendemos)\s+com\s+(isso|esse|esta|ist[oa])\b/i,
+  /\bn[aã]o\s+[eé]\s+(o\s+|a\s+)?(nosso|meu|minha)\s+(ramo|segmento|perfil|foco|area|área)\b/i,
+  /\bn[aã]o\s+(compramos|adquirimos|contratamos)\b/i
 ];
 
 const FRASES_DESINTERESSE = [
@@ -61,7 +71,13 @@ const FRASES_DESINTERESSE = [
   'nao preciso',
   'nao precisamos',
   'nao serve',
-  'agora nao',
+  'agora nao obrigado',
+  'agora nao obrigada',
+  'nao e prioridade',
+  'nao faz sentido pra mim',
+  'nao faz sentido para mim',
+  'nao faz sentido pra nos',
+  'nao faz sentido para nos',
   'outra hora',
   'proxima hora',
   'fica pra outra hora',
@@ -109,7 +125,13 @@ const PADROES_AUTOMATICOS = [
   /digite\s+\d+\s+para/i,
   /trabalho com\s*:/i,
   /me conta\s*👇?/i,
-  /qual .* voc[eê] quer/i
+  /qual .* voc[eê] quer/i,
+  // Robôs de compras/fornecedores (B2B mismatch): não somos fornecedor deles
+  /portal\s+de\s+fornecedor/i,
+  /cadastro\s+de\s+fornecedor/i,
+  /cadastre-?se\s+(no|pelo|em)\s+/i,
+  /setor\s+de\s+compras/i,
+  /oferecer\s+(seus?\s+)?(servi[cç]os?|produtos?)\s+para/i
 ];
 
 const TERMOS_DOR = [
@@ -141,6 +163,21 @@ const TERMOS_VAGOS = [
   'pode ser',
   'me fala melhor',
   'explica melhor'
+];
+
+const TERMOS_OBJECAO = [
+  'caro',
+  'sem tempo',
+  'ocupado',
+  'correria',
+  'ja uso',
+  'ja tenho',
+  'crm',
+  'planilha',
+  'funciona mesmo',
+  'seguranca',
+  'seguro',
+  'nao confio'
 ];
 
 function normalizarTexto(texto) {
@@ -194,8 +231,10 @@ function mensagemAmbigua(texto) {
   const palavras = normalizado.split(' ').filter(Boolean);
   const temTermoDor = TERMOS_DOR.some(termo => normalizado.includes(termo));
   const temTermoVago = TERMOS_VAGOS.some(termo => normalizado.includes(termo));
+  const temObjecao = TERMOS_OBJECAO.some(termo => normalizado.includes(termo));
 
   if (temTermoVago) return true;
+  if (temObjecao) return false;
   if (palavras.length <= 3 && !temTermoDor) return true;
   if (palavras.length <= 6 && /^(sim|ok|certo|entendi|beleza|pode ser)/.test(normalizado) && !temTermoDor) return true;
 

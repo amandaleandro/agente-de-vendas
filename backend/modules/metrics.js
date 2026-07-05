@@ -24,6 +24,7 @@ class MetricsManager {
 
   registrarRespostaIA({ telefone, tamanho, fonte, truncado = false }) {
     const registro = {
+      tipo: 'resposta_ia',
       telefone,
       tamanho: Math.floor(tamanho),
       fonte: fonte === 'ia' ? 'ia' : 'roteiro',
@@ -36,6 +37,64 @@ class MetricsManager {
 
     fs.appendFileSync(this.metricsFile, `${JSON.stringify(registro)}\n`, 'utf8');
     this.rotacionarMetricasSeNecessario();
+  }
+
+  registrarRiscoWhatsApp({ sessao, evento, severidade = 'info', telefone = null, detalhe = null, erro = null }) {
+    const registro = {
+      tipo: 'whatsapp_risco',
+      sessao: sessao ? String(sessao) : null,
+      evento,
+      severidade,
+      telefone,
+      detalhe,
+      erro,
+      timestamp: new Date().toISOString(),
+    };
+
+    this.metricsEmMemoria.push(registro);
+    if (this.metricsEmMemoria.length > 10000) this.metricsEmMemoria.shift();
+
+    fs.appendFileSync(this.metricsFile, `${JSON.stringify(registro)}\n`, 'utf8');
+    this.rotacionarMetricasSeNecessario();
+  }
+
+  obterResumoRiscoWhatsApp() {
+    const hoje = new Date().toDateString();
+    const eventosHoje = this.metricsEmMemoria.filter(m => {
+      if (m.tipo !== 'whatsapp_risco') return false;
+      return new Date(m.timestamp).toDateString() === hoje;
+    });
+
+    const porEvento = {};
+    const porSessao = {};
+    for (const evento of eventosHoje) {
+      porEvento[evento.evento] = (porEvento[evento.evento] || 0) + 1;
+      const sessao = evento.sessao || 'desconhecida';
+      if (!porSessao[sessao]) {
+        porSessao[sessao] = {
+          total: 0,
+          banimentosProvaveis: 0,
+          shadowbansProvaveis: 0,
+          optOuts: 0,
+          rejeicoesEnvio: 0,
+          desconexoes: 0,
+        };
+      }
+      porSessao[sessao].total++;
+      if (evento.evento === 'logged_out') porSessao[sessao].banimentosProvaveis++;
+      if (evento.evento === 'shadowban_detectado') porSessao[sessao].shadowbansProvaveis++;
+      if (evento.evento === 'opt_out') porSessao[sessao].optOuts++;
+      if (evento.evento === 'envio_rejeitado') porSessao[sessao].rejeicoesEnvio++;
+      if (evento.evento === 'desconexao') porSessao[sessao].desconexoes++;
+    }
+
+    return {
+      totalHoje: eventosHoje.length,
+      porEvento,
+      porSessao,
+      ultimosEventos: eventosHoje.slice(-50).reverse(),
+      observacao: 'Denuncias diretas nao sao expostas pelo WhatsApp/Baileys; opt-out, rejeicao e logged_out sao sinais indiretos.',
+    };
   }
 
   rotacionarMetricasSeNecessario() {

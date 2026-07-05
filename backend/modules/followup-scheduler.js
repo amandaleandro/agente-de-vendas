@@ -1,6 +1,5 @@
 /**
- * FollowupScheduler - Follow-up automático baseado em score
- * Não deixa ninguém cair, reengage leads frios
+ * FollowupScheduler - follow-up automatico baseado em score.
  */
 
 class FollowupScheduler {
@@ -9,42 +8,38 @@ class FollowupScheduler {
     this.followupsPendentes = new Map(); // telefone -> { timestamp, tipo, dados }
     this.timersAtivos = new Map();
     this.intervaloVerificacao = 60000; // 1 minuto
+    this.delays = {
+      FECHAR_AGORA: Number(process.env.FOLLOWUP_SCORE_HOT_MIN) || 2,
+      ENVIAR_DIAGNOSTICO: Number(process.env.FOLLOWUP_SCORE_WARM_MIN) || 15,
+      RETOMAR_CONVERSA: Number(process.env.FOLLOWUP_SCORE_COLD_MIN) || 120,
+      TENTAR_NOVAMENTE: Number(process.env.FOLLOWUP_SCORE_LOW_MIN) || 24 * 60
+    };
   }
 
-  /**
-   * Agenda follow-up baseado no score e comportamento
-   */
   agendarFollowup(telefone, score, etapa) {
     let tipoFollowup = null;
     let delayMinutos = 0;
 
-    // Baseado no score e etapa, decidir quando fazer follow-up
     if (score >= 80 && etapa === 'perguntou_produto') {
-      // HOT - follow-up IMEDIATO para fechar
       tipoFollowup = 'FECHAR_AGORA';
-      delayMinutos = 2; // 2 minutos
+      delayMinutos = this.delays.FECHAR_AGORA;
     } else if (score >= 60 && etapa === 'diagnostico') {
-      // WARM - follow-up com diagnóstico
       tipoFollowup = 'ENVIAR_DIAGNOSTICO';
-      delayMinutos = 15; // 15 minutos
+      delayMinutos = this.delays.ENVIAR_DIAGNOSTICO;
     } else if (score >= 40 && etapa === 'dor') {
-      // COLD - reengage para continuar conversa
       tipoFollowup = 'RETOMAR_CONVERSA';
-      delayMinutos = 120; // 2 horas
+      delayMinutos = this.delays.RETOMAR_CONVERSA;
     } else if (score < 40 && !this.ehDesistente(telefone)) {
-      // DEAD mas não desistente - tentar de novo depois
       tipoFollowup = 'TENTAR_NOVAMENTE';
-      delayMinutos = 24 * 60; // 1 dia
+      delayMinutos = this.delays.TENTAR_NOVAMENTE;
     }
 
     if (!tipoFollowup) return null;
 
-    // Limpar timer anterior se existir
     if (this.timersAtivos.has(telefone)) {
       clearTimeout(this.timersAtivos.get(telefone));
     }
 
-    // Agendar novo timer
     const timestamp = new Date();
     const dataExecutar = new Date(timestamp.getTime() + delayMinutos * 60000);
 
@@ -69,12 +64,9 @@ class FollowupScheduler {
     return followup;
   }
 
-  /**
-   * Executa o follow-up agendado
-   */
   async executarFollowup(telefone, tipoFollowup) {
     try {
-      console.log(`📞 Executando follow-up ${tipoFollowup} para ${telefone}`);
+      console.log(`Executando follow-up ${tipoFollowup} para ${telefone}`);
 
       const mensagens = {
         FECHAR_AGORA: this.mensagemFecha(),
@@ -94,67 +86,54 @@ class FollowupScheduler {
         }
       }
 
-      // Salvar no histórico
       this.salvarFollowup(telefone, tipoFollowup);
-
-      // Remover dos pendentes
       this.followupsPendentes.delete(telefone);
     } catch (err) {
-      console.error(`❌ Erro ao executar follow-up ${tipoFollowup}:`, err.message);
+      console.error(`Erro ao executar follow-up ${tipoFollowup}:`, err.message);
     }
   }
 
-  /**
-   * Verifica se o lead é desistente (pediu para parar)
-   */
   ehDesistente(telefone) {
-    // Verificar em opt-out ou histórico de "não quero"
-    // Isso seria integrado com o opt-out system
-    return false;
+    const normalizado = String(telefone || '').replace(/\D/g, '');
+    return !!(global.optOutContatos && global.optOutContatos.has(normalizado));
   }
 
-  /**
-   * Mensagens de follow-up personalizadas
-   */
   mensagemFecha() {
     const mensagens = [
-      'Opa! Você interessado agora? Mando o link pra você começar? 👇\nhttps://fechapro.com.br/auth/signup?plan=annual',
-      'Pronto pra começar? Aqui está o link: https://fechapro.com.br/auth/signup?plan=annual\nQual plano você quer?',
-      'Vi que você tem interesse! Qual é a melhor forma pra você começar? Mando o link agora?'
+      'Opa! Voce ainda tem interesse? Posso te mandar o link para comecar?',
+      'Pronto para comecar? Se fizer sentido, te mando o link agora.',
+      'Vi que voce tem interesse. Qual e a melhor forma de seguir daqui?'
     ];
     return mensagens[Math.floor(Math.random() * mensagens.length)];
   }
 
   mensagemDiagnostico() {
     const mensagens = [
-      'Opa, voltei aqui! Fiz um diagnóstico da sua situação. Vê isso: https://fechapro.com.br/diagnostico',
-      'Testei o sistema pra você. Vê como fica: https://fechapro.com.br/diagnostico',
-      'Pronto! Aqui está o diagnóstico customizado pro seu negócio: https://fechapro.com.br/diagnostico'
+      'Opa, voltei aqui. Quer que eu te mande o diagnostico para ver se faz sentido?',
+      'Consigo te mostrar um diagnostico rapido da sua situacao. Quer ver?',
+      'Tenho um caminho simples para comparar onde voce pode melhorar o acompanhamento. Te mando?'
     ];
     return mensagens[Math.floor(Math.random() * mensagens.length)];
   }
 
   mensagemRetomada() {
     const mensagens = [
-      'Opa! Voltei aqui pra retomar nossa conversa. Ainda tem interesse em resolver o problema de acompanhamento de cliente?',
-      'E aí? Continuamos conversando sobre como aumentar suas vendas?',
-      'Rápido: você resolveu aquele problema de cliente sumir depois da proposta? Se não, podemos resolver junto!'
+      'Opa, voltei aqui rapido. Ainda faz sentido falar sobre acompanhamento de clientes?',
+      'Continuamos aquela conversa sobre melhorar seus retornos com clientes?',
+      'Me diz uma coisa: esse problema de cliente sumir depois da proposta ainda acontece ai?'
     ];
     return mensagens[Math.floor(Math.random() * mensagens.length)];
   }
 
   mensagemTentarNovamente() {
     const mensagens = [
-      'Opa, uma última tentativa! Você realmente não se interessou pela solução? 😅',
-      'Sem problema se agora não é momento. Mas avisa se mudar de ideia!',
-      'Tudo bem deixar pra depois. Só chama quando precisar! 😊'
+      'Passando uma ultima vez: esse assunto nao faz sentido agora ou vale retomar depois?',
+      'Sem problema se agora nao for o momento. Quer que eu deixe para outro dia?',
+      'Tudo bem deixar para depois. Se quiser retomar, me chama por aqui.'
     ];
     return mensagens[Math.floor(Math.random() * mensagens.length)];
   }
 
-  /**
-   * Salva follow-up executado no banco (para análise futura)
-   */
   async salvarFollowup(telefone, tipoFollowup) {
     try {
       if (!this.pool) return;
@@ -171,34 +150,35 @@ class FollowupScheduler {
     }
   }
 
-  /**
-   * Retorna lista de follow-ups pendentes
-   */
   obterPendentes() {
     return Array.from(this.followupsPendentes.values()).sort(
       (a, b) => a.dataExecutar - b.dataExecutar
     );
   }
 
-  /**
-   * Cancela follow-up de um lead
-   */
   cancelarFollowup(telefone) {
-    if (this.timersAtivos.has(telefone)) {
-      clearTimeout(this.timersAtivos.get(telefone));
-      this.timersAtivos.delete(telefone);
+    const normalizado = String(telefone || '').split('@')[0].replace(/\D/g, '');
+    const chaves = new Set([telefone, String(telefone || ''), normalizado]);
+
+    for (const chave of this.timersAtivos.keys()) {
+      const chaveNormalizada = String(chave || '').split('@')[0].replace(/\D/g, '');
+      if (chaveNormalizada === normalizado) chaves.add(chave);
     }
-    this.followupsPendentes.delete(telefone);
+
+    for (const chave of chaves) {
+      if (this.timersAtivos.has(chave)) {
+        clearTimeout(this.timersAtivos.get(chave));
+        this.timersAtivos.delete(chave);
+      }
+      this.followupsPendentes.delete(chave);
+    }
   }
 
-  /**
-   * Retorna estatísticas
-   */
   obterEstatisticas() {
     return {
       totalPendentes: this.followupsPendentes.size,
-      porTipo: Array.from(this.followupsPendentes.values()).reduce((acc, f) => {
-        acc[f.tipo] = (acc[f.tipo] || 0) + 1;
+      porTipo: Array.from(this.followupsPendentes.values()).reduce((acc, followup) => {
+        acc[followup.tipo] = (acc[followup.tipo] || 0) + 1;
         return acc;
       }, {}),
       proximoFollowup: this.obterPendentes()[0]?.dataExecutar

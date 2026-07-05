@@ -6,35 +6,81 @@ class FollowupManager {
   constructor(geminiKey, sendFunction) {
     this.geminiKey = geminiKey;
     this.sendFunction = sendFunction; // async (destinatario, texto, sessao)
-    
+
     this.conhecimentoDir = path.join(__dirname, '..', 'conhecimento');
     this.arquivoTreinamento = path.join(this.conhecimentoDir, 'mensagens_treinamento.jsonl');
     this.arquivoFollowups = path.join(this.conhecimentoDir, 'followups_enviados.json');
-    
-    this.followupsEnviados = new Set();
+
+    this.cadencia = this.carregarCadencia();
+    this.followupsEnviados = new Map();
     this.carregarFollowupsEnviados();
-    
+
     this.gemini = this.geminiKey ? new GoogleGenAI({ apiKey: this.geminiKey }) : null;
   }
 
+  carregarCadencia() {
+    const padrao = [24, 48, 72, 168];
+    const horas = String(process.env.FOLLOWUP_CADENCIA_HORAS || padrao.join(','))
+      .split(',')
+      .map(valor => Number(valor.trim()))
+      .filter(valor => Number.isFinite(valor) && valor > 0)
+      .sort((a, b) => a - b);
+
+    return (horas.length ? horas : padrao).map((horasInativo, index) => ({
+      etapa: index + 1,
+      horasInativo,
+      chave: `${horasInativo}h`
+    }));
+  }
+
   carregarFollowupsEnviados() {
-    if (fs.existsSync(this.arquivoFollowups)) {
-      try {
-        const dados = JSON.parse(fs.readFileSync(this.arquivoFollowups, 'utf8'));
-        this.followupsEnviados = new Set(dados);
-      } catch (err) {
-        console.error('Erro ao ler followups_enviados.json', err);
+    if (!fs.existsSync(this.arquivoFollowups)) return;
+
+    try {
+      const dados = JSON.parse(fs.readFileSync(this.arquivoFollowups, 'utf8'));
+
+      if (Array.isArray(dados)) {
+        // Compatibilidade com o formato antigo: ["telefone"].
+        this.followupsEnviados = new Map(
+          dados.map(telefone => [String(telefone), { enviados: ['24h'] }])
+        );
+        return;
       }
+
+      if (dados && typeof dados === 'object') {
+        this.followupsEnviados = new Map(Object.entries(dados));
+      }
+    } catch (err) {
+      console.error('Erro ao ler followups_enviados.json', err);
     }
   }
 
-  salvarFollowup(telefone) {
-    this.followupsEnviados.add(telefone);
+  jaEnviouEtapa(telefone, chaveEtapa) {
+    const registro = this.followupsEnviados.get(String(telefone));
+    return Array.isArray(registro?.enviados) && registro.enviados.includes(chaveEtapa);
+  }
+
+  salvarFollowup(telefone, etapa) {
+    const tel = String(telefone);
+    const registro = this.followupsEnviados.get(tel) || { enviados: [] };
+
+    if (!Array.isArray(registro.enviados)) registro.enviados = [];
+    if (!registro.enviados.includes(etapa.chave)) registro.enviados.push(etapa.chave);
+
+    registro.ultimaEtapa = etapa.chave;
+    registro.ultimoEnvioEm = new Date().toISOString();
+    this.followupsEnviados.set(tel, registro);
+
     try {
       if (!fs.existsSync(this.conhecimentoDir)) {
         fs.mkdirSync(this.conhecimentoDir, { recursive: true });
       }
-      fs.writeFileSync(this.arquivoFollowups, JSON.stringify(Array.from(this.followupsEnviados)));
+
+      fs.writeFileSync(
+        this.arquivoFollowups,
+        JSON.stringify(Object.fromEntries(this.followupsEnviados), null, 2),
+        'utf8'
+      );
     } catch (err) {
       console.error('Erro ao salvar followups_enviados.json', err);
     }
@@ -42,22 +88,23 @@ class FollowupManager {
 
   async analisarEEnviarFollowups() {
     if (!this.gemini || !fs.existsSync(this.arquivoTreinamento)) return;
-    
-    console.log('🔄 Iniciando rotina de Follow-up Automático...');
-    
+
+    console.log('Iniciando rotina de follow-up automatico...');
+
     try {
-      const linhas = fs.readFileSync(this.arquivoTreinamento, 'utf8').split('\n').filter(l => l.trim());
-      
-      // Agrupar por contato para pegar o último estado
+      const linhas = fs.readFileSync(this.arquivoTreinamento, 'utf8')
+        .split('\n')
+        .filter(linha => linha.trim());
+
       const ultimasMensagens = new Map();
-      
+
       linhas.forEach(linha => {
         try {
           const reg = JSON.parse(linha);
           if (!reg.contato) return;
-          
-          let tel = reg.contato.split('@')[0];
-          
+
+          const tel = reg.contato.split('@')[0];
+
           if (!ultimasMensagens.has(tel) || reg.timestamp > ultimasMensagens.get(tel).timestamp) {
             ultimasMensagens.set(tel, {
               contato: reg.contato,
@@ -68,54 +115,62 @@ class FollowupManager {
               nome: reg.nome || 'Cliente'
             });
           }
-        } catch(e){}
+        } catch (err) {}
       });
 
       const agora = Date.now();
-      const UMA_HORA_EM_MS = 60 * 60 * 1000;
-      const UM_DIA_EM_MS = 24 * UMA_HORA_EM_MS;
+      const umaHoraMs = 60 * 60 * 1000;
 
       for (const [tel, ultima] of ultimasMensagens.entries()) {
         if (global.optOutContatos && global.optOutContatos.has(String(tel).replace(/\D/g, ''))) {
           continue;
         }
 
-        // Se a última mensagem foi enviada pelo bot (ou seja, o cliente parou de responder)
-        if (ultima.enviada_pelo_bot) {
-          const tempoPassado = agora - ultima.timestamp;
-          
-          // Se já passou 24h e ainda não enviamos follow-up para esse cara
-          if (tempoPassado > UM_DIA_EM_MS && !this.followupsEnviados.has(tel)) {
-            console.log(`⏰ Lead ${tel} inativo há mais de 24h. Gerando follow-up...`);
-            
-            // Gerar follow up
-            const textoGerado = await this.gerarTextoFollowup(ultima);
-            if (textoGerado) {
-              try {
-                await this.sendFunction(ultima.contato, textoGerado, ultima.sessao);
-                this.salvarFollowup(tel);
-                console.log(`✅ Follow-up enviado para ${tel}: "${textoGerado}"`);
-              } catch(err) {
-                console.error(`❌ Erro ao enviar follow-up para ${tel}:`, err.message);
-              }
-            }
-          }
+        if (!ultima.enviada_pelo_bot) continue;
+
+        const horasPassadas = (agora - ultima.timestamp) / umaHoraMs;
+        const etapa = this.cadencia.find(item => (
+          horasPassadas >= item.horasInativo && !this.jaEnviouEtapa(tel, item.chave)
+        ));
+
+        if (!etapa) continue;
+
+        console.log(`Lead ${tel} inativo ha mais de ${etapa.horasInativo}h. Gerando follow-up etapa ${etapa.etapa}...`);
+
+        const textoGerado = await this.gerarTextoFollowup(ultima, etapa);
+        if (!textoGerado) continue;
+
+        try {
+          await this.sendFunction(ultima.contato, textoGerado, ultima.sessao);
+          this.salvarFollowup(tel, etapa);
+          console.log(`Follow-up enviado para ${tel}: "${textoGerado}"`);
+        } catch (err) {
+          console.error(`Erro ao enviar follow-up para ${tel}:`, err.message);
         }
       }
-      
-      console.log('✅ Rotina de Follow-up concluída.');
+
+      console.log('Rotina de follow-up concluida.');
     } catch (err) {
-      console.error('❌ Erro na rotina de Follow-up:', err.message);
+      console.error('Erro na rotina de follow-up:', err.message);
     }
   }
 
-  async gerarTextoFollowup(dadosUltimaMensagem) {
-    const prompt = `Você é o assistente de vendas do FechaPro. Você estava conversando com o cliente "${dadosUltimaMensagem.nome}".
-A sua última mensagem para ele foi: "${dadosUltimaMensagem.texto}"
-Faz mais de 24 horas que ele não responde.
+  async gerarTextoFollowup(dadosUltimaMensagem, etapa) {
+    const tomPorEtapa = {
+      1: 'retomar de forma leve, perguntando se ele conseguiu ver a ultima mensagem',
+      2: 'oferecer um resumo rapido e facil de responder',
+      3: 'trazer valor ligado a acompanhamento de cliente sem pressionar',
+      4: 'fazer uma ultima tentativa educada, abrindo espaco para ele responder depois'
+    };
 
-Crie uma ÚNICA mensagem curta (máximo 120 caracteres) e amigável para retomar o contato com ele. Seja natural, parecendo um humano chamando de volta.
-Não use aspas na resposta.`;
+    const orientacao = tomPorEtapa[etapa.etapa] || 'retomar de forma educada e breve';
+    const prompt = `Voce e o assistente de vendas do FechaPro. Voce estava conversando com o cliente "${dadosUltimaMensagem.nome}".
+A sua ultima mensagem para ele foi: "${dadosUltimaMensagem.texto}"
+Faz mais de ${etapa.horasInativo} horas que ele nao responde.
+Esta e a etapa ${etapa.etapa} de follow-up. Objetivo: ${orientacao}.
+
+Crie uma UNICA mensagem curta (maximo 120 caracteres) e amigavel para retomar o contato com ele. Seja natural, parecendo um humano chamando de volta.
+Nao use aspas na resposta.`;
 
     try {
       const result = await this.gemini.models.generateContent({
@@ -124,10 +179,18 @@ Não use aspas na resposta.`;
           { role: 'user', parts: [{ text: prompt }] }
         ]
       });
+
       return result.response.text().trim();
     } catch (err) {
       console.error('Erro ao gerar mensagem de follow-up com a IA:', err.message);
-      return `Oi ${dadosUltimaMensagem.nome}, tudo bem? Conseguiu ver minha última mensagem?`;
+      const fallback = [
+        `Oi ${dadosUltimaMensagem.nome}, tudo bem? Conseguiu ver minha ultima mensagem?`,
+        `Oi ${dadosUltimaMensagem.nome}, quer que eu te mande um resumo rapido por aqui?`,
+        'Passando rapido: ainda faz sentido falar sobre acompanhar melhor seus clientes?',
+        `Sem pressa, ${dadosUltimaMensagem.nome}. Deixo por aqui caso queira retomar depois.`
+      ];
+
+      return fallback[Math.min(etapa.etapa - 1, fallback.length - 1)];
     }
   }
 }

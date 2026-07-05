@@ -133,6 +133,7 @@ class ChatStore {
         texto: messageObj.text || '',
         enviada_pelo_bot: Boolean(messageObj.fromMe),
         is_bot: Boolean(messageObj.isBot),
+        is_internal_warmup: Boolean(messageObj.isInternalWarmup),
         sessao,
         timestamp: messageObj.timestamp || Date.now(),
         id: messageObj.id || null
@@ -193,6 +194,24 @@ class ChatStore {
     if (!sessionChats.has(jid)) return [];
     
     return sessionChats.get(jid).messages;
+  }
+
+  getAllConversations() {
+    const conversas = [];
+    for (const [sessao, sessionChats] of this.chats.entries()) {
+      for (const [jid, data] of sessionChats.entries()) {
+        conversas.push({
+          sessao,
+          jid,
+          name: data.name,
+          unread: data.unread,
+          lastTime: data.lastTime,
+          requiresAttention: data.requiresAttention || false,
+          messages: data.messages || []
+        });
+      }
+    }
+    return conversas.sort((a, b) => b.lastTime - a.lastTime);
   }
 
   /**

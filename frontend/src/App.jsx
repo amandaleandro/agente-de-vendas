@@ -1,6 +1,6 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare, Flame, Brain, TrendingUp, Shield, Activity, LinkIcon } from 'lucide-react';
+import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare, Brain, TrendingUp, Shield, Activity, LinkIcon, ClipboardCheck, GitBranch } from 'lucide-react';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Conexao = lazy(() => import('./pages/Conexao'));
@@ -9,7 +9,6 @@ const Configuracao = lazy(() => import('./pages/Configuracao'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const TerminalLogs = lazy(() => import('./pages/TerminalLogs'));
 const Conversas = lazy(() => import('./pages/Conversas'));
-const Warmup = lazy(() => import('./pages/Warmup'));
 const LearningDashboard = lazy(() => import('./components/LearningDashboard'));
 const LearningConfig = lazy(() => import('./pages/LearningConfig'));
 const KnowledgeBase = lazy(() => import('./pages/KnowledgeBase'));
@@ -18,6 +17,9 @@ const BackupManager = lazy(() => import('./pages/BackupManager'));
 const SystemMonitor = lazy(() => import('./pages/SystemMonitor'));
 const DemoPage = lazy(() => import('./pages/DemoPage'));
 const CRMConfig = lazy(() => import('./pages/CRMConfig'));
+const WarmConversationTest = lazy(() => import('./pages/WarmConversationTest'));
+const QualityCenter = lazy(() => import('./pages/QualityCenter'));
+const CRMFunnel = lazy(() => import('./pages/CRMFunnel'));
 
 function App() {
   return (
@@ -47,8 +49,11 @@ function App() {
             <NavLink to="/conversas" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <MessageSquare size={20} /> Conversas
             </NavLink>
-            <NavLink to="/warmup" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Flame size={20} /> Warmup
+            <NavLink to="/qualidade" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <ClipboardCheck size={20} /> Qualidade
+            </NavLink>
+            <NavLink to="/warm-conversation" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <MessageSquare size={20} /> Teste Aquecimento
             </NavLink>
             <NavLink to="/learning" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <Brain size={20} /> Aprendizado Bot
@@ -74,6 +79,9 @@ function App() {
             <NavLink to="/crm" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <LinkIcon size={20} /> Integrações CRM
             </NavLink>
+            <NavLink to="/funil" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <GitBranch size={20} /> Funil de Vendas
+            </NavLink>
           </div>
         </nav>
         
@@ -88,7 +96,8 @@ function App() {
               <Route path="/conexao" element={<Conexao />} />
               <Route path="/prospeccao" element={<Prospeccao />} />
               <Route path="/conversas" element={<Conversas />} />
-              <Route path="/warmup" element={<Warmup />} />
+              <Route path="/qualidade" element={<QualityCenter />} />
+              <Route path="/warm-conversation" element={<WarmConversationTest />} />
               <Route path="/learning" element={<LearningDashboard />} />
               <Route path="/learning-config" element={<LearningConfig />} />
               <Route path="/knowledge-base" element={<KnowledgeBase />} />
@@ -97,6 +106,7 @@ function App() {
               <Route path="/backup" element={<BackupManager />} />
               <Route path="/monitor" element={<SystemMonitor />} />
               <Route path="/crm" element={<CRMConfig />} />
+              <Route path="/funil" element={<CRMFunnel />} />
             </Routes>
           </Suspense>
         </main>

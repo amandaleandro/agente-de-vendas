@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, User, Bot, AlertCircle, Play } from 'lucide-react';
+import { Send, User, Bot, AlertCircle, Play, ChevronLeft, ChevronRight, Pause, Ban } from 'lucide-react';
+import Pagination from '../components/Pagination';
 
 export default function Conversas() {
   const [sessaoAtiva, setSessaoAtiva] = useState('todos');
@@ -9,7 +10,9 @@ export default function Conversas() {
   const [mensagens, setMensagens] = useState([]);
   const [mensagemInput, setMensagemInput] = useState('');
   const [isPaused, setIsPaused] = useState(false);
-  
+  const [paginaContatos, setPaginaContatos] = useState(1);
+  const itemsPorPagina = 30;
+
   const messagesEndRef = useRef(null);
 
   // Carregar número de sessões da config
@@ -130,8 +133,43 @@ export default function Conversas() {
     }
   };
 
+  const handlePauseIA = async () => {
+    if (!contatoAtivo) return;
+    try {
+      await fetch('/api/chat/pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessao: contatoAtivo.sessao || sessaoAtiva, jid: contatoAtivo.jid })
+      });
+      setIsPaused(true);
+    } catch(err) {
+      console.error(err);
+    }
+  };
+
+  const handleOptOut = async () => {
+    if (!contatoAtivo) return;
+    if (!window.confirm('Marcar este contato como sem interesse e bloquear novos envios?')) return;
+    try {
+      await fetch('/api/chat/optout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessao: contatoAtivo.sessao || sessaoAtiva, jid: contatoAtivo.jid })
+      });
+      setIsPaused(true);
+    } catch(err) {
+      console.error(err);
+    }
+  };
+
   const formatTime = (ts) => {
     return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getContatosPaginados = () => {
+    const inicio = (paginaContatos - 1) * itemsPorPagina;
+    const fim = inicio + itemsPorPagina;
+    return contatos.slice(inicio, fim);
   };
 
   return (
@@ -145,16 +183,16 @@ export default function Conversas() {
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
         <button
           className={`btn ${sessaoAtiva === 'todos' ? 'btn-primary' : ''}`}
-          onClick={() => { setSessaoAtiva('todos'); setContatoAtivo(null); }}
+          onClick={() => { setSessaoAtiva('todos'); setContatoAtivo(null); setPaginaContatos(1); }}
           style={sessaoAtiva !== 'todos' ? { background: 'rgba(255,255,255,0.05)' } : {}}
         >
           Todos os Chips
         </button>
         {sessoes.map(s => (
-          <button 
-            key={s} 
+          <button
+            key={s}
             className={`btn ${sessaoAtiva === s ? 'btn-primary' : ''}`}
-            onClick={() => { setSessaoAtiva(s); setContatoAtivo(null); }}
+            onClick={() => { setSessaoAtiva(s); setContatoAtivo(null); setPaginaContatos(1); }}
             style={sessaoAtiva !== s ? { background: 'rgba(255,255,255,0.05)' } : {}}
           >
             Sessão (Chip) {s}
@@ -165,11 +203,14 @@ export default function Conversas() {
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}>
         
         {/* Sidebar de Contatos */}
-        <div style={{ width: '30%', borderRight: '1px solid rgba(255,255,255,0.1)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ width: '22%', borderRight: '1px solid rgba(255,255,255,0.1)', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.2)' }}>
             <h3 style={{ margin: 0, fontSize: '1.1rem' }}>
               Chats {sessaoAtiva === 'todos' ? '(Todos os Chips)' : `(Sessão ${sessaoAtiva})`}
             </h3>
+            <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              {contatos.length} conversa{contatos.length !== 1 ? 's' : ''} total
+            </p>
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {contatos.length === 0 ? (
@@ -177,13 +218,13 @@ export default function Conversas() {
                 Nenhuma conversa recente registrada pelo painel.
               </div>
             ) : (
-              contatos.map(c => (
-                <div 
+              getContatosPaginados().map(c => (
+                <div
                   key={`${c.sessao}:${c.jid}`}
                   onClick={() => setContatoAtivo(c)}
-                  style={{ 
-                    padding: '1rem', 
-                    borderBottom: '1px solid rgba(255,255,255,0.05)', 
+                  style={{
+                    padding: '1rem',
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
                     cursor: 'pointer',
                     background: contatoAtivo?.jid === c.jid && contatoAtivo?.sessao === c.sessao ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
                     display: 'flex',
@@ -217,6 +258,43 @@ export default function Conversas() {
               ))
             )}
           </div>
+          {contatos.length > itemsPorPagina && (
+            <div style={{ padding: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center', background: 'rgba(0,0,0,0.2)' }}>
+              <button
+                onClick={() => setPaginaContatos(p => Math.max(1, p - 1))}
+                disabled={paginaContatos === 1}
+                style={{
+                  padding: '0.4rem 0.6rem',
+                  background: paginaContatos === 1 ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '4px',
+                  color: paginaContatos === 1 ? 'var(--text-dim)' : 'white',
+                  cursor: paginaContatos === 1 ? 'not-allowed' : 'pointer',
+                  fontSize: '0.8rem'
+                }}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {paginaContatos} / {Math.ceil(contatos.length / itemsPorPagina)}
+              </span>
+              <button
+                onClick={() => setPaginaContatos(p => Math.min(Math.ceil(contatos.length / itemsPorPagina), p + 1))}
+                disabled={paginaContatos >= Math.ceil(contatos.length / itemsPorPagina)}
+                style={{
+                  padding: '0.4rem 0.6rem',
+                  background: paginaContatos >= Math.ceil(contatos.length / itemsPorPagina) ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '4px',
+                  color: paginaContatos >= Math.ceil(contatos.length / itemsPorPagina) ? 'var(--text-dim)' : 'white',
+                  cursor: paginaContatos >= Math.ceil(contatos.length / itemsPorPagina) ? 'not-allowed' : 'pointer',
+                  fontSize: '0.8rem'
+                }}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Área de Mensagens */}
@@ -235,19 +313,29 @@ export default function Conversas() {
                   </div>
                 </div>
                 
-                {isPaused ? (
-                  <button className="btn btn-primary" onClick={handleResumeIA} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#f59e0b', borderColor: '#f59e0b' }}>
-                    <Play size={16} /> Retomar IA
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  {isPaused ? (
+                    <button className="btn btn-primary" onClick={handleResumeIA} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#f59e0b', borderColor: '#f59e0b' }}>
+                      <Play size={16} /> Retomar IA
+                    </button>
+                  ) : contatoAtivo.requiresAttention ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ef4444', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                      <AlertCircle size={18} /> AGUARDANDO HUMANO
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--success)', fontSize: '0.9rem' }}>
+                      <Bot size={18} /> IA Ativa
+                    </div>
+                  )}
+                  {!isPaused && (
+                    <button className="btn" onClick={handlePauseIA} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <Pause size={16} /> Pausar
+                    </button>
+                  )}
+                  <button className="btn btn-danger" onClick={handleOptOut} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Ban size={16} /> Sem interesse
                   </button>
-                ) : contatoAtivo.requiresAttention ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ef4444', fontSize: '0.9rem', fontWeight: 'bold' }}>
-                    <AlertCircle size={18} /> AGUARDANDO HUMANO
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--success)', fontSize: '0.9rem' }}>
-                    <Bot size={18} /> IA Ativa
-                  </div>
-                )}
+                </div>
               </div>
 
               {/* Lista de Mensagens */}
@@ -256,7 +344,7 @@ export default function Conversas() {
                   const isMine = msg.fromMe;
                   const showBot = isMine && msg.isBot;
                   return (
-                    <div key={msg.id || i} style={{ alignSelf: isMine ? 'flex-end' : 'flex-start', maxWidth: '70%' }}>
+                    <div key={msg.id || i} style={{ alignSelf: isMine ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
                       <div style={{ 
                         background: isMine ? 'var(--primary)' : 'rgba(255,255,255,0.1)', 
                         padding: '0.75rem 1rem', 
@@ -279,16 +367,27 @@ export default function Conversas() {
 
               {/* Input */}
               <div style={{ padding: '1rem', background: 'rgba(0,0,0,0.2)', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-                <form onSubmit={handleSend} style={{ display: 'flex', gap: '0.5rem' }}>
-                  <input 
-                    type="text" 
+                <form onSubmit={handleSend} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
+                  <textarea
                     value={mensagemInput}
                     onChange={e => setMensagemInput(e.target.value)}
-                    placeholder="Digite uma mensagem para intervir (a IA será pausada)..." 
-                    className="form-input" 
-                    style={{ flex: 1 }}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSend(e);
+                      }
+                    }}
+                    placeholder="Digite uma mensagem para intervir (a IA será pausada)... (Enter para enviar, Shift+Enter para nova linha)"
+                    className="form-input"
+                    style={{
+                      flex: 1,
+                      minHeight: '150px',
+                      resize: 'vertical',
+                      padding: '0.75rem',
+                      lineHeight: '1.5'
+                    }}
                   />
-                  <button type="submit" className="btn btn-primary" disabled={!mensagemInput.trim()} style={{ width: '50px', display: 'flex', justifyContent: 'center', padding: 0 }}>
+                  <button type="submit" className="btn btn-primary" disabled={!mensagemInput.trim()} style={{ width: '50px', height: '50px', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 0, flexShrink: 0 }}>
                     <Send size={18} />
                   </button>
                 </form>

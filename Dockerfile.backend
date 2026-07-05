@@ -15,6 +15,9 @@ RUN npm ci --only=production
 # Copiar código
 COPY backend/ .
 
+# Criar diretórios necessários
+RUN mkdir -p logs backups listas conhecimento sessions auth_info_baileys
+
 # Expor porta
 EXPOSE 3099
 

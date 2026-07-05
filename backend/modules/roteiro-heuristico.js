@@ -173,6 +173,42 @@ Quer fazer um teste? Aqui: ${this.URL_DIAGNOSTICO}
       intencao = 'desconhecido';
     }
 
+    // Handle agradecimentos
+    if (intencao === 'agradecimento') {
+      const opcoes = [
+        'De nada! Qualquer dúvida, só chamar! 😊',
+        'Por nada! Fico feliz em ajudar!',
+        'Claro! Fico à disposição!',
+        'Nada! Sempre que precisar estou aqui!'
+      ];
+      const resposta = opcoes[Math.floor(Math.random() * opcoes.length)];
+      return resposta;
+    }
+
+    // Handle confirmações
+    if (intencao === 'confirmacao') {
+      const opcoes = [
+        'Ótimo! Me diz então: qual é seu maior desafio agora?',
+        'Show! Vamos nessa. Qual é seu principal problema?',
+        'Combinado! Qual é a sua maior dificuldade?',
+        'Perfeito! Qual é o gargalo que mais te incomoda?'
+      ];
+      const resposta = opcoes[Math.floor(Math.random() * opcoes.length)];
+      return resposta;
+    }
+
+    // Handle indecisão
+    if (intencao === 'indecisao') {
+      const opcoes = [
+        'Tranquilo, fica à vontade. Eu fico por aqui se mudar de ideia!',
+        'Sem problema! Quando tiver interesse, é só chamar.',
+        'Claro, leva o tempo que precisar. Estou aqui quando quiser retomar!',
+        'Tudo bem! Qualquer coisa é só me contactar novamente.'
+      ];
+      const resposta = opcoes[Math.floor(Math.random() * opcoes.length)];
+      return resposta;
+    }
+
     // Sempre respeitar desinteresse explícito
     if (this.ehDesinteresse(texto)) {
       this.etapasPorContato.set(telefone, 'encerrado');
@@ -212,7 +248,7 @@ Quer fazer um teste? Aqui: ${this.URL_DIAGNOSTICO}
     }
 
     if (intencao === 'teste_bot') {
-      return 'Boa! Sim, sou assistente. Tô tentando entender seu negócio. Depois que você manda um orçamento, o cliente costuma sumir ou volta com dúvidas?';
+      return 'Boa pergunta. Eu tô te atendendo por aqui pra entender seu processo mesmo. Depois que você manda um orçamento, o cliente costuma sumir ou volta com dúvidas?';
     }
 
     // Verificar se já perguntou algo parecido no histórico
@@ -370,18 +406,32 @@ Quer fazer um teste? Aqui: ${this.URL_DIAGNOSTICO}
     }
 
     // Resposta padrão quando não consegue classificar
-    let resposta = 'Qual parte da venda mais emperrada pra você - é a proposta, o preço, ou o cliente não voltar depois?';
+    let resposta = '';
 
-    if (this.ehRespostaRepetida(telefone, resposta)) {
-      const alternativas = [
-        'Mas me diz então: qual é seu principal problema?',
-        'Então qual é a principal dificuldade sua?',
-        'E aí, qual seu maior desafio?',
-        'Me fala então: qual é mesmo seu gargalo?',
-        'Qual é o número 1 na sua lista de problemas?',
-        'Se você pudesse resolver UMA coisa agora, qual seria?'
+    // Se é mensagem muito curta ou vaga, pedir esclarecimento
+    if (texto.length < 10 || intencao === 'desconhecido') {
+      const opcoes = [
+        'Desculpa, não entendi muito bem. Pode me explicar melhor?',
+        'Hmm, poderia detalhar um pouco mais? 🤔',
+        'Opa, não consegui captar direito. Me explica de novo?',
+        'Entendi parcialmente. Pode esclarecer mais?',
+        'Qual é seu maior desafio agora - é captar cliente, fazer proposta, ou fechar a venda?'
       ];
-      resposta = alternativas[Math.floor(Math.random() * alternativas.length)];
+      resposta = opcoes[Math.floor(Math.random() * opcoes.length)];
+    } else {
+      resposta = 'Qual parte da venda mais emperrada pra você - é a proposta, o preço, ou o cliente não voltar depois?';
+
+      if (this.ehRespostaRepetida(telefone, resposta)) {
+        const alternativas = [
+          'Me diz então: qual é seu principal problema?',
+          'Qual é a principal dificuldade sua?',
+          'Qual seu maior desafio?',
+          'Qual é seu gargalo principal?',
+          'Qual é o número 1 na sua lista de problemas?',
+          'Se você pudesse resolver UMA coisa agora, qual seria?'
+        ];
+        resposta = alternativas[Math.floor(Math.random() * alternativas.length)];
+      }
     }
 
     this.registrarResposta(telefone, resposta);

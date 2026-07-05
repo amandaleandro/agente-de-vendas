@@ -43,11 +43,12 @@ const AutoRetrainPanel = () => {
       const res = await fetch('/api/learning/auto-retrain/forca', { method: 'POST' });
       const dados = await res.json();
 
-      if (dados.sucesso) {
+      if (dados.sucesso && dados.resultado) {
         alert(`✅ Retreinamento forçado concluído!\n\nFrases adicionadas: ${dados.resultado.sucessos}\nNovas intenções: ${dados.resultado.novas_intencoes?.length || 0}`);
         carregarStatus();
       } else {
-        alert('❌ Erro: ' + dados.erro);
+        const errorMsg = dados.erro || 'Erro desconhecido ao executar retreinamento';
+        alert('❌ Erro: ' + errorMsg);
       }
     } catch (err) {
       alert('❌ Erro ao forçar retrain: ' + err.message);

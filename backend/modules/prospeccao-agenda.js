@@ -147,6 +147,60 @@ class ProspeccaoAgenda {
   /**
    * Cria fila de planilhas para execução
    */
+  obterSocketValidacao(socket = null) {
+    if (socket?.onWhatsApp) return socket;
+    const sockets = global.socketsConectados;
+    if (!sockets || sockets.size === 0) return null;
+    return sockets.values().next().value;
+  }
+
+  async validarPlanilhasNoWhatsApp(planilhas, socket = null) {
+    const socketValidacao = this.obterSocketValidacao(socket);
+    if (!socketValidacao) {
+      console.log('Validacao WhatsApp: nenhum chip conectado; fila sera validada antes do envio.');
+      return { planilhas, removidos: [], validado: false };
+    }
+
+    const removidos = [];
+    const planilhasValidadas = [];
+
+    for (const planilha of planilhas) {
+      const contatosValidos = [];
+
+      for (const contato of planilha.contatos || []) {
+        try {
+          const telefone = String(contato.telefone || '').replace(/\D/g, '');
+          const numero = telefone.startsWith('55') ? telefone : `55${telefone}`;
+          const consulta = await socketValidacao.onWhatsApp(numero);
+
+          if (consulta?.[0]?.exists) {
+            contatosValidos.push({ ...contato, telefone: numero, jid: consulta[0].jid });
+          } else {
+            removidos.push({ planilha: planilha.nome, telefone: contato.telefone, motivo: 'numero nao esta no WhatsApp' });
+          }
+        } catch (err) {
+          removidos.push({ planilha: planilha.nome, telefone: contato.telefone, motivo: err.message });
+        }
+      }
+
+      planilhasValidadas.push({
+        ...planilha,
+        contatos_totais: contatosValidos.length,
+        contatos: contatosValidos
+      });
+    }
+
+    if (removidos.length > 0) {
+      console.log(`Validacao WhatsApp: ${removidos.length} contato(s) removido(s) da fila.`);
+    }
+
+    return {
+      planilhas: planilhasValidadas.filter(p => p.contatos_totais > 0),
+      removidos,
+      validado: true
+    };
+  }
+
   criarFila(planilhas = null) {
     // Se não passar planilhas, carrega do diretório
     if (!planilhas) {

@@ -59,7 +59,8 @@ class ProspeccaoHistorico {
                 status: 'enviado',
                 sessao: registro.sessao,
                 nome: registro.nome,
-                empresa: registro.empresa
+                empresa: registro.empresa,
+                prospeccaoContexto: registro.prospeccaoContexto || null
               });
             }
           } catch (err) {
@@ -129,7 +130,8 @@ class ProspeccaoHistorico {
           status: 'enviado',
           sessao: dados.sessao,
           nome: dados.nome,
-          empresa: dados.empresa
+          empresa: dados.empresa,
+          prospeccaoContexto: dados.prospeccaoContexto || null
         });
         this.liberarReserva(telefone);
       }

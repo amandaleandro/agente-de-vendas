@@ -86,10 +86,15 @@ class WarmConversationManager {
 
   iniciarConversa(sessao1, sessao2, tema = null) {
     const conversaId = `conv_${this.proximaConversaId++}`;
+    const temas = Array.isArray(this.repertorio.temas) ? this.repertorio.temas : [];
+
+    if (temas.length === 0) {
+      return { sucesso: false, erro: 'Nenhum tema de conversa cadastrado' };
+    }
 
     const temaEscolhido = tema
-      ? this.repertorio.temas.find(t => t.id === tema)
-      : this.repertorio.temas[Math.floor(Math.random() * this.repertorio.temas.length)];
+      ? temas.find(t => t.id === tema)
+      : temas[Math.floor(Math.random() * temas.length)];
 
     if (!temaEscolhido) {
       return { sucesso: false, erro: 'Tema não encontrado' };
