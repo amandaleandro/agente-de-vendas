@@ -35,6 +35,27 @@ const DIALOGOS = {
       "Tranquilo. Era so pra saber se ficou tudo certo.",
       "Ficou sim, obrigado.",
       "Boa. Entao seguimos assim."
+    ],
+    [
+      "Bom dia! Dormiu bem?",
+      "Dormi sim, mas acordei cedo demais.",
+      "Kkk eu tambem. Café ja rolou ai?",
+      "Ja, café e pao na mesa.",
+      "Otimo dia entao pra voce."
+    ],
+    [
+      "Bom dia! Ja separou aquilo que a gente falou?",
+      "Bom dia! Ja sim, ta guardado aqui.",
+      "Perfeito, depois me manda.",
+      "Mando sim, so terminar uma coisa aqui.",
+      "Sem pressa."
+    ],
+    [
+      "Oi, bom dia. Como foi o fim de semana?",
+      "Bom dia! Foi tranquilo, e o seu?",
+      "Bom tambem, aproveitei pra descansar.",
+      "Que bom. Segunda ja com energia entao.",
+      "Isso ai, vamo que vamo."
     ]
   ],
   tarde: [
@@ -67,6 +88,27 @@ const DIALOGOS = {
       "Beleza, vou separar aqui.",
       "Fechado. Assim que eu parar eu olho.",
       "Obrigado."
+    ],
+    [
+      "Boa tarde! Almocou bem?",
+      "Almocei sim, e voce?",
+      "Tambem, mas ja voltei pro corre.",
+      "Kkk aqui igual, sem descanso.",
+      "Faz parte. Boa tarde de trabalho ai."
+    ],
+    [
+      "Oi, deu pra resolver aquilo mais cedo?",
+      "Deu sim, ficou mais facil do que eu pensava.",
+      "Que bom. Fico feliz que resolveu.",
+      "Valeu por perguntar.",
+      "Disponha, qualquer coisa me chama."
+    ],
+    [
+      "Boa tarde! Ainda ta naquela correria?",
+      "Um pouco menos agora, ta mais tranquilo.",
+      "Que bom. Consegue ver aquele assunto entao?",
+      "Consigo sim, vou olhar daqui a pouco.",
+      "Perfeito, obrigado."
     ]
   ],
   noite: [
@@ -91,6 +133,20 @@ const DIALOGOS = {
       "Entendi. Se precisar eu vejo amanha cedo.",
       "Pode ser. Obrigado.",
       "Boa noite."
+    ],
+    [
+      "Boa noite, como foi o dia?",
+      "Foi corrido, mas produtivo.",
+      "Que bom. Amanha deve ser mais tranquilo.",
+      "Espero que sim. Descansa ai.",
+      "Voce tambem, boa noite."
+    ],
+    [
+      "Oi, boa noite! Ainda ta acordado?",
+      "To sim, terminando uma coisa aqui.",
+      "Nao esquenta, era so pra saber de voce.",
+      "Valeu por lembrar. Falo com voce amanha.",
+      "Combinado, ate amanha."
     ]
   ],
   geral: [
@@ -135,6 +191,27 @@ const DIALOGOS = {
       "Aquele horario ficou melhor pra voce mesmo?",
       "Ficou sim.",
       "Perfeito, obrigado."
+    ],
+    [
+      "Opa, tudo certo?",
+      "Tudo certo sim, e voce?",
+      "Na correria, mas indo.",
+      "Kkk sempre assim. Boa sorte ai.",
+      "Valeu, pra voce tambem."
+    ],
+    [
+      "Oi, voce fica sabendo de tudo por ai, ne kkk",
+      "Kkk mais ou menos. O que rolou?",
+      "Nada demais, so brincando mesmo.",
+      "Kkk imaginei. Qualquer novidade me conta.",
+      "Combinado."
+    ],
+    [
+      "Fala, tudo em ordem?",
+      "Tudo em ordem sim.",
+      "Bom saber. Depois te chamo pra alinhar uma coisa.",
+      "Beleza, fico no aguardo.",
+      "Falo com voce ainda hoje."
     ]
   ]
 };
@@ -153,11 +230,21 @@ function variarMensagem(texto) {
   if (Math.random() < 0.08 && texto.endsWith('.')) {
     return texto.slice(0, -1);
   }
+  if (Math.random() < 0.06) {
+    return texto.replace(/\btambem\b/gi, 'tbm');
+  }
+  if (Math.random() < 0.05 && texto.endsWith('?')) {
+    return `${texto.slice(0, -1)}?!`;
+  }
   return `${texto}${SUFIXOS_LEVES[Math.floor(Math.random() * SUFIXOS_LEVES.length)]}`;
 }
 
 // Espera entre 4 a 12 segundos para parecer humano digitando
 const sleepHumano = () => new Promise(resolve => setTimeout(resolve, 4000 + Math.random() * 8000));
+
+// Atraso aleatorio antes de cada conversa comecar, para varias conversas
+// simultaneas nao "nascerem" todas no mesmo segundo
+const sleepEscalonado = () => new Promise(resolve => setTimeout(resolve, Math.random() * 45000));
 
 class CrossWarmupManager {
   constructor() {
@@ -176,6 +263,12 @@ class CrossWarmupManager {
     }, intervaloMinutos * 60 * 1000);
   }
 
+  /**
+   * Pega TODAS as sessoes logadas e elegiveis (dinamico: funciona com
+   * qualquer quantidade de numeros, nao apenas 2) e forma o maior numero
+   * possivel de pares, embaralhados a cada rodada. Cada par conversa em
+   * paralelo, com inicio escalonado para parecer humano.
+   */
   async executarSorteio() {
     if (this.emExecucao) return;
     if (!global.socketsConectados || global.socketsConectados.size < 2) return; // Precisa de pelo menos 2
@@ -193,13 +286,25 @@ class CrossWarmupManager {
       return;
     }
 
-    // Sortear 2 sessoes diferentes
-    const s1 = sessoesAtivas[Math.floor(Math.random() * sessoesAtivas.length)];
-    let s2;
-    do {
-      s2 = sessoesAtivas[Math.floor(Math.random() * sessoesAtivas.length)];
-    } while (s1[0] === s2[0]);
+    // Embaralha todas as sessoes elegiveis e forma pares (N/2 conversas),
+    // garantindo que, ao longo das rodadas, todos os numeros logados participem
+    const embaralhadas = [...sessoesAtivas].sort(() => Math.random() - 0.5);
+    const pares = [];
+    for (let i = 0; i + 1 < embaralhadas.length; i += 2) {
+      pares.push([embaralhadas[i], embaralhadas[i + 1]]);
+    }
 
+    console.log(`Warmup Cruzado: iniciando ${pares.length} conversa(s) simultanea(s) entre ${embaralhadas.length} numero(s) logado(s) e elegivel(is).`);
+
+    this.emExecucao = true;
+    try {
+      await Promise.all(pares.map(par => this.executarConversa(par[0], par[1])));
+    } finally {
+      this.emExecucao = false;
+    }
+  }
+
+  async executarConversa(s1, s2) {
     const socketA = s1[1];
     const socketB = s2[1];
 
@@ -209,9 +314,9 @@ class CrossWarmupManager {
     const chavePar = [s1[0], s2[0]].map(String).sort().join(':');
     const script = this.escolherScript(chavePar);
 
+    await sleepEscalonado();
     console.log(`Iniciando interacao de Warmup Cruzado entre ${jidA} e ${jidB}`);
 
-    this.emExecucao = true;
     try {
       for (let i = 0; i < script.length; i++) {
         await sleepHumano();
@@ -227,9 +332,7 @@ class CrossWarmupManager {
       }
       console.log(`Warmup Cruzado entre ${jidA} e ${jidB} finalizado com sucesso.`);
     } catch (err) {
-      console.log(`Erro no Warmup Cruzado: ${err.message}`);
-    } finally {
-      this.emExecucao = false;
+      console.log(`Erro no Warmup Cruzado entre ${jidA} e ${jidB}: ${err.message}`);
     }
   }
 
