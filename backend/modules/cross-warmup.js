@@ -239,12 +239,35 @@ function variarMensagem(texto) {
   return `${texto}${SUFIXOS_LEVES[Math.floor(Math.random() * SUFIXOS_LEVES.length)]}`;
 }
 
-// Espera entre 4 a 12 segundos para parecer humano digitando
+// Espera entre 4 a 12 segundos para parecer humano pensando antes de digitar
 const sleepHumano = () => new Promise(resolve => setTimeout(resolve, 4000 + Math.random() * 8000));
 
 // Atraso aleatorio antes de cada conversa comecar, para varias conversas
 // simultaneas nao "nascerem" todas no mesmo segundo
 const sleepEscalonado = () => new Promise(resolve => setTimeout(resolve, Math.random() * 45000));
+
+function tempoDigitando(texto = '') {
+  return Math.min(6000, Math.max(1200, texto.length * 45));
+}
+
+// Mostra "digitando..." pro destinatario antes de enviar, igual ao restante do bot
+async function enviarComDigitando(socketAtual, destinatario, texto) {
+  try {
+    await socketAtual.presenceSubscribe?.(destinatario);
+    await socketAtual.sendPresenceUpdate?.('composing', destinatario);
+    await new Promise(resolve => setTimeout(resolve, tempoDigitando(texto)));
+  } catch (err) {
+    // Sem indicador de digitando nao impede o envio da mensagem
+  }
+
+  try {
+    return await socketAtual.sendMessage(destinatario, { text: texto });
+  } finally {
+    try {
+      await socketAtual.sendPresenceUpdate?.('paused', destinatario);
+    } catch (err) {}
+  }
+}
 
 class CrossWarmupManager {
   constructor() {
@@ -324,10 +347,10 @@ class CrossWarmupManager {
 
         if (i % 2 === 0) {
           // Socket A envia para Socket B
-          await socketA.sendMessage(jidB, { text: mensagem });
+          await enviarComDigitando(socketA, jidB, mensagem);
         } else {
           // Socket B envia para Socket A
-          await socketB.sendMessage(jidA, { text: mensagem });
+          await enviarComDigitando(socketB, jidA, mensagem);
         }
       }
       console.log(`Warmup Cruzado entre ${jidA} e ${jidB} finalizado com sucesso.`);
