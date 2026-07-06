@@ -24,6 +24,7 @@ qrcode.txt
 # ========================================
 backend/logs/
 backend/backups/
+backend/relatorios/
 *.log
 npm-debug.log
 yarn-error.log

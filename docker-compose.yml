@@ -51,6 +51,9 @@ services:
       FOLLOWUP_SCORE_WARM_MIN: ${FOLLOWUP_SCORE_WARM_MIN:-15}
       FOLLOWUP_SCORE_COLD_MIN: ${FOLLOWUP_SCORE_COLD_MIN:-120}
       FOLLOWUP_SCORE_LOW_MIN: ${FOLLOWUP_SCORE_LOW_MIN:-1440}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      BACKUP_SCHEDULE_CRON: "${BACKUP_SCHEDULE_CRON:-0 2 * * *}"
+      REPORT_SCHEDULE_CRON: "${REPORT_SCHEDULE_CRON:-0 8 * * 1}"
     ports:
       - "${API_PORT:-3099}:3099"
     depends_on:
@@ -59,6 +62,7 @@ services:
     volumes:
       # Dados persistentes do backend
       - ./data/backups:/app/backend/backups
+      - ./data/relatorios:/app/backend/relatorios
       - ./data/conhecimento:/app/backend/conhecimento
       - ./data/logs:/app/backend/logs
       - ./data/learning:/app/backend/learning

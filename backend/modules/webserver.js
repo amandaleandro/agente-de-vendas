@@ -14,6 +14,8 @@ const responseSelector = require('./response-selector');
 const slackNotifications = require('./slack-notifications');
 const knowledgeBase = require('./knowledge-base');
 const backupManager = require('./backup-manager');
+const pdfReport = require('./pdf-report');
+const pdfReportScheduler = require('./pdf-report-scheduler');
 const monitorSystem = require('./monitor-system');
 const crmIntegration = require('./crm-integration');
 const smartGenerator = require('./smart-generator');
@@ -266,6 +268,210 @@ const MIME_TYPES = {
   '.otf': 'application/font-otf',
   '.wasm': 'application/wasm'
 };
+
+function obterDadosAnalytics() {
+  const ARQUIVO_PROSPECCAO = path.join(__dirname, '..', 'listas', 'prospeccao_resultados.jsonl');
+  const ARQUIVO_AGENDA = path.join(__dirname, '..', 'listas', 'prospeccao_agenda.json');
+  const ARQUIVO_TREINAMENTO = path.join(__dirname, '..', 'conhecimento', 'mensagens_treinamento.jsonl');
+  const normalizarTelefone = (valor) => {
+    let tel = String(valor || '').split('@')[0].replace(/\D/g, '');
+    if ((tel.length === 10 || tel.length === 11) && !tel.startsWith('55')) tel = `55${tel}`;
+    return tel;
+  };
+  const telefonesConectados = new Set();
+  if (global.socketsConectados) {
+    global.socketsConectados.forEach(socket => {
+      const id = socket?.user?.id;
+      const tel = normalizarTelefone(id);
+      if (tel) telefonesConectados.add(tel);
+    });
+  }
+  const ehTelefoneInterno = (valor) => {
+    const tel = normalizarTelefone(valor);
+    return tel && telefonesConectados.has(tel);
+  };
+  const formatarDuracao = (ms) => {
+    if (!Number.isFinite(ms) || ms < 0) return '0min';
+    const totalSegundos = Math.round(ms / 1000);
+    const horas = Math.floor(totalSegundos / 3600);
+    const minutos = Math.floor((totalSegundos % 3600) / 60);
+    const segundos = totalSegundos % 60;
+    if (horas > 0) return `${horas}h ${minutos}min`;
+    if (minutos > 0) return `${minutos}min ${segundos}s`;
+    return `${segundos}s`;
+  };
+  const incrementar = (mapa, chave, dadosBase = {}) => {
+    if (!mapa.has(chave)) mapa.set(chave, { ...dadosBase, total: 0 });
+    mapa.get(chave).total++;
+    return mapa.get(chave);
+  };
+
+  const leadsEnviados = new Map(); // telefone -> { nome, empresa, data_envio }
+  const ultimosEnvios = [];
+  const enviosPorTelefone = new Map();
+  const enviosPorNumeroDia = new Map();
+  const enviosPorNumeroHora = new Map();
+
+  if (fs.existsSync(ARQUIVO_PROSPECCAO)) {
+    const linhas = fs.readFileSync(ARQUIVO_PROSPECCAO, 'utf8').split('\n').filter(l => l.trim());
+    linhas.forEach(linha => {
+      try {
+        const reg = JSON.parse(linha);
+        if (reg.status === 'enviado' && reg.telefone) {
+          const tel = normalizarTelefone(reg.telefone);
+          if (!leadsEnviados.has(tel) || new Date(reg.data) < new Date(leadsEnviados.get(tel).data)) {
+            leadsEnviados.set(tel, {
+              telefone: tel,
+              nome: reg.nome || 'Desconhecido',
+              empresa: reg.empresa || reg['empresa/nome'] || 'N/A',
+              data: reg.data
+            });
+          }
+          ultimosEnvios.push({
+            telefone: tel,
+            nome: reg.nome || 'Desconhecido',
+            empresa: reg.empresa || reg['empresa/nome'] || 'N/A',
+            data: reg.data,
+            sessao: reg.sessao || 1,
+            perfil: reg.perfil || ''
+          });
+
+          const dataEnvio = new Date(reg.data || reg.timestamp || Date.now());
+          const dia = dataEnvio.toISOString().slice(0, 10);
+          const hora = `${dia} ${String(dataEnvio.getHours()).padStart(2, '0')}:00`;
+          const numero = `Sessao ${reg.sessao || 1}`;
+          const porTelefone = incrementar(enviosPorTelefone, tel, {
+            telefone: tel,
+            nome: reg.nome || 'Desconhecido',
+            empresa: reg.empresa || reg['empresa/nome'] || 'N/A',
+            ultima_data: reg.data
+          });
+          porTelefone.ultima_data = reg.data;
+          incrementar(enviosPorNumeroDia, `${numero}|${dia}`, { numero, dia });
+          incrementar(enviosPorNumeroHora, `${numero}|${hora}`, { numero, hora });
+        }
+      } catch(e) {}
+    });
+  }
+
+  const planilhas = [];
+  if (fs.existsSync(ARQUIVO_AGENDA)) {
+    try {
+      const agenda = JSON.parse(fs.readFileSync(ARQUIVO_AGENDA, 'utf8'));
+      const statusPlanilhas = agenda.statusPlanilhas || {};
+      Object.entries(statusPlanilhas).forEach(([nome, status]) => {
+        const inicio = status.inicio ? new Date(status.inicio) : null;
+        const fim = status.fim ? new Date(status.fim) : (status.status === 'executando' ? new Date() : null);
+        const duracaoMs = inicio && fim ? fim - inicio : 0;
+        planilhas.push({
+          nome,
+          status: status.status,
+          inicio: status.inicio || null,
+          fim: status.fim || null,
+          duracao_ms: duracaoMs,
+          duracao: formatarDuracao(duracaoMs),
+          contatos_totais: status.contatos_totais || 0,
+          contatos_enviados: status.contatos_enviados || 0,
+          erros: status.erros || 0
+        });
+      });
+    } catch(e) {}
+  }
+
+  const planilhasComDuracao = planilhas.filter(p => p.duracao_ms > 0);
+  const duracaoMediaMs = planilhasComDuracao.length > 0
+    ? Math.round(planilhasComDuracao.reduce((sum, p) => sum + p.duracao_ms, 0) / planilhasComDuracao.length)
+    : 0;
+
+  const leadsQueResponderam = new Map(); // telefone -> { ...dados_lead, total_mensagens, ultima_mensagem }
+  const registrarResposta = (telefone, texto, timestamp = Date.now()) => {
+    const tel = normalizarTelefone(telefone);
+    if (!tel || !leadsEnviados.has(tel)) return;
+
+    if (!leadsQueResponderam.has(tel)) {
+      leadsQueResponderam.set(tel, {
+        ...leadsEnviados.get(tel),
+        total_mensagens: 0,
+        ultima_mensagem: texto,
+        ultima_resposta_em: new Date(timestamp).toISOString()
+      });
+    }
+
+    const lead = leadsQueResponderam.get(tel);
+    lead.total_mensagens++;
+    lead.ultima_mensagem = texto;
+    lead.ultima_resposta_em = new Date(timestamp).toISOString();
+  };
+
+  if (fs.existsSync(ARQUIVO_TREINAMENTO)) {
+    const linhas = fs.readFileSync(ARQUIVO_TREINAMENTO, 'utf8').split('\n').filter(l => l.trim());
+    linhas.forEach(linha => {
+      try {
+        const reg = JSON.parse(linha);
+        if (!reg.enviada_pelo_bot && reg.contato && !reg.is_internal_warmup && !ehTelefoneInterno(reg.contato)) {
+          registrarResposta(reg.contato, reg.texto || '', reg.timestamp || Date.now());
+        }
+      } catch(e){}
+    });
+  }
+
+  if (chatStore && chatStore.chats) {
+    chatStore.chats.forEach((sessionChats) => {
+      sessionChats.forEach((chat, jid) => {
+        chat.messages.forEach((msg) => {
+          if (!msg.fromMe && !msg.isInternalWarmup && !ehTelefoneInterno(jid)) {
+            registrarResposta(jid, msg.text || '', msg.timestamp || Date.now());
+          }
+        });
+      });
+    });
+  }
+
+  const leadsFormatados = Array.from(leadsQueResponderam.values()).sort((a,b) => new Date(b.ultima_resposta_em || b.data) - new Date(a.ultima_resposta_em || a.data));
+  const totalProspectados = leadsEnviados.size;
+
+  return {
+    funil: {
+      prospectados: totalProspectados,
+      responderam: leadsQueResponderam.size,
+      taxaConversao: totalProspectados > 0 ? ((leadsQueResponderam.size / totalProspectados) * 100).toFixed(1) : 0
+    },
+    leadsQuentes: leadsFormatados,
+    ultimosEnvios: ultimosEnvios
+      .sort((a,b) => new Date(b.data) - new Date(a.data))
+      .slice(0, 100),
+    filas: {
+      duracaoMediaMs,
+      duracaoMedia: formatarDuracao(duracaoMediaMs),
+      totalPlanilhasMedidas: planilhasComDuracao.length,
+      planilhas: planilhas.sort((a,b) => new Date(b.inicio || 0) - new Date(a.inicio || 0))
+    },
+    envios: {
+      porTelefone: Array.from(enviosPorTelefone.values())
+        .sort((a,b) => b.total - a.total)
+        .slice(0, 100),
+      porNumeroDia: Array.from(enviosPorNumeroDia.values())
+        .sort((a,b) => b.dia.localeCompare(a.dia) || a.numero.localeCompare(b.numero)),
+      porNumeroHora: Array.from(enviosPorNumeroHora.values())
+        .sort((a,b) => b.hora.localeCompare(a.hora) || a.numero.localeCompare(b.numero))
+    },
+    // Mantem compatibilidade com telas antigas, mas continua contendo somente envios.
+    mensagens: {
+      porTelefone: Array.from(enviosPorTelefone.values())
+        .sort((a,b) => b.total - a.total)
+        .slice(0, 100),
+      porNumeroDia: Array.from(enviosPorNumeroDia.values())
+        .sort((a,b) => b.dia.localeCompare(a.dia) || a.numero.localeCompare(b.numero)),
+      porNumeroHora: Array.from(enviosPorNumeroHora.values())
+        .sort((a,b) => b.hora.localeCompare(a.hora) || a.numero.localeCompare(b.numero))
+    },
+    respostasClientes: {
+      totalLeads: leadsQueResponderam.size,
+      totalMensagens: Array.from(leadsQueResponderam.values())
+        .reduce((total, lead) => total + Number(lead.total_mensagens || 0), 0)
+    }
+  };
+}
 
 const server = http.createServer((req, res) => {
   console.log(`📨 [API] ${req.method} ${req.url}`);
@@ -622,207 +828,7 @@ const server = http.createServer((req, res) => {
 
       if (url === '/api/analytics/dados') {
         try {
-          const ARQUIVO_PROSPECCAO = path.join(__dirname, '..', 'listas', 'prospeccao_resultados.jsonl');
-          const ARQUIVO_AGENDA = path.join(__dirname, '..', 'listas', 'prospeccao_agenda.json');
-          const ARQUIVO_TREINAMENTO = path.join(__dirname, '..', 'conhecimento', 'mensagens_treinamento.jsonl');
-          const normalizarTelefone = (valor) => {
-            let tel = String(valor || '').split('@')[0].replace(/\D/g, '');
-            if ((tel.length === 10 || tel.length === 11) && !tel.startsWith('55')) tel = `55${tel}`;
-            return tel;
-          };
-          const telefonesConectados = new Set();
-          if (global.socketsConectados) {
-            global.socketsConectados.forEach(socket => {
-              const id = socket?.user?.id;
-              const tel = normalizarTelefone(id);
-              if (tel) telefonesConectados.add(tel);
-            });
-          }
-          const ehTelefoneInterno = (valor) => {
-            const tel = normalizarTelefone(valor);
-            return tel && telefonesConectados.has(tel);
-          };
-          const formatarDuracao = (ms) => {
-            if (!Number.isFinite(ms) || ms < 0) return '0min';
-            const totalSegundos = Math.round(ms / 1000);
-            const horas = Math.floor(totalSegundos / 3600);
-            const minutos = Math.floor((totalSegundos % 3600) / 60);
-            const segundos = totalSegundos % 60;
-            if (horas > 0) return `${horas}h ${minutos}min`;
-            if (minutos > 0) return `${minutos}min ${segundos}s`;
-            return `${segundos}s`;
-          };
-          const incrementar = (mapa, chave, dadosBase = {}) => {
-            if (!mapa.has(chave)) mapa.set(chave, { ...dadosBase, total: 0 });
-            mapa.get(chave).total++;
-            return mapa.get(chave);
-          };
-
-          const leadsEnviados = new Map(); // telefone -> { nome, empresa, data_envio }
-          const ultimosEnvios = [];
-          const enviosPorTelefone = new Map();
-          const enviosPorNumeroDia = new Map();
-          const enviosPorNumeroHora = new Map();
-          
-          if (fs.existsSync(ARQUIVO_PROSPECCAO)) {
-            const linhas = fs.readFileSync(ARQUIVO_PROSPECCAO, 'utf8').split('\n').filter(l => l.trim());
-            linhas.forEach(linha => {
-              try {
-                const reg = JSON.parse(linha);
-                if (reg.status === 'enviado' && reg.telefone) {
-                  const tel = normalizarTelefone(reg.telefone);
-                  if (!leadsEnviados.has(tel) || new Date(reg.data) < new Date(leadsEnviados.get(tel).data)) {
-                    leadsEnviados.set(tel, {
-                      telefone: tel,
-                      nome: reg.nome || 'Desconhecido',
-                      empresa: reg.empresa || reg['empresa/nome'] || 'N/A',
-                      data: reg.data
-                    });
-                  }
-                  ultimosEnvios.push({
-                    telefone: tel,
-                    nome: reg.nome || 'Desconhecido',
-                    empresa: reg.empresa || reg['empresa/nome'] || 'N/A',
-                    data: reg.data,
-                    sessao: reg.sessao || 1,
-                    perfil: reg.perfil || ''
-                  });
-
-                  const dataEnvio = new Date(reg.data || reg.timestamp || Date.now());
-                  const dia = dataEnvio.toISOString().slice(0, 10);
-                  const hora = `${dia} ${String(dataEnvio.getHours()).padStart(2, '0')}:00`;
-                  const numero = `Sessao ${reg.sessao || 1}`;
-                  const porTelefone = incrementar(enviosPorTelefone, tel, {
-                    telefone: tel,
-                    nome: reg.nome || 'Desconhecido',
-                    empresa: reg.empresa || reg['empresa/nome'] || 'N/A',
-                    ultima_data: reg.data
-                  });
-                  porTelefone.ultima_data = reg.data;
-                  incrementar(enviosPorNumeroDia, `${numero}|${dia}`, { numero, dia });
-                  incrementar(enviosPorNumeroHora, `${numero}|${hora}`, { numero, hora });
-                }
-              } catch(e) {}
-            });
-          }
-
-          const planilhas = [];
-          if (fs.existsSync(ARQUIVO_AGENDA)) {
-            try {
-              const agenda = JSON.parse(fs.readFileSync(ARQUIVO_AGENDA, 'utf8'));
-              const statusPlanilhas = agenda.statusPlanilhas || {};
-              Object.entries(statusPlanilhas).forEach(([nome, status]) => {
-                const inicio = status.inicio ? new Date(status.inicio) : null;
-                const fim = status.fim ? new Date(status.fim) : (status.status === 'executando' ? new Date() : null);
-                const duracaoMs = inicio && fim ? fim - inicio : 0;
-                planilhas.push({
-                  nome,
-                  status: status.status,
-                  inicio: status.inicio || null,
-                  fim: status.fim || null,
-                  duracao_ms: duracaoMs,
-                  duracao: formatarDuracao(duracaoMs),
-                  contatos_totais: status.contatos_totais || 0,
-                  contatos_enviados: status.contatos_enviados || 0,
-                  erros: status.erros || 0
-                });
-              });
-            } catch(e) {}
-          }
-
-          const planilhasComDuracao = planilhas.filter(p => p.duracao_ms > 0);
-          const duracaoMediaMs = planilhasComDuracao.length > 0
-            ? Math.round(planilhasComDuracao.reduce((sum, p) => sum + p.duracao_ms, 0) / planilhasComDuracao.length)
-            : 0;
-
-          const leadsQueResponderam = new Map(); // telefone -> { ...dados_lead, total_mensagens, ultima_mensagem }
-          const registrarResposta = (telefone, texto, timestamp = Date.now()) => {
-            const tel = normalizarTelefone(telefone);
-            if (!tel || !leadsEnviados.has(tel)) return;
-
-            if (!leadsQueResponderam.has(tel)) {
-              leadsQueResponderam.set(tel, {
-                ...leadsEnviados.get(tel),
-                total_mensagens: 0,
-                ultima_mensagem: texto,
-                ultima_resposta_em: new Date(timestamp).toISOString()
-              });
-            }
-
-            const lead = leadsQueResponderam.get(tel);
-            lead.total_mensagens++;
-            lead.ultima_mensagem = texto;
-            lead.ultima_resposta_em = new Date(timestamp).toISOString();
-          };
-          
-          if (fs.existsSync(ARQUIVO_TREINAMENTO)) {
-            const linhas = fs.readFileSync(ARQUIVO_TREINAMENTO, 'utf8').split('\n').filter(l => l.trim());
-            linhas.forEach(linha => {
-              try {
-                const reg = JSON.parse(linha);
-                if (!reg.enviada_pelo_bot && reg.contato && !reg.is_internal_warmup && !ehTelefoneInterno(reg.contato)) {
-                  registrarResposta(reg.contato, reg.texto || '', reg.timestamp || Date.now());
-                }
-              } catch(e){}
-            });
-          }
-
-          if (chatStore && chatStore.chats) {
-            chatStore.chats.forEach((sessionChats) => {
-              sessionChats.forEach((chat, jid) => {
-                chat.messages.forEach((msg) => {
-                  if (!msg.fromMe && !msg.isInternalWarmup && !ehTelefoneInterno(jid)) {
-                    registrarResposta(jid, msg.text || '', msg.timestamp || Date.now());
-                  }
-                });
-              });
-            });
-          }
-
-          const leadsFormatados = Array.from(leadsQueResponderam.values()).sort((a,b) => new Date(b.ultima_resposta_em || b.data) - new Date(a.ultima_resposta_em || a.data));
-          const totalProspectados = leadsEnviados.size;
-
-          return json(200, {
-            funil: {
-              prospectados: totalProspectados,
-              responderam: leadsQueResponderam.size,
-              taxaConversao: totalProspectados > 0 ? ((leadsQueResponderam.size / totalProspectados) * 100).toFixed(1) : 0
-            },
-            leadsQuentes: leadsFormatados,
-            ultimosEnvios: ultimosEnvios
-              .sort((a,b) => new Date(b.data) - new Date(a.data))
-              .slice(0, 100),
-            filas: {
-              duracaoMediaMs,
-              duracaoMedia: formatarDuracao(duracaoMediaMs),
-              totalPlanilhasMedidas: planilhasComDuracao.length,
-              planilhas: planilhas.sort((a,b) => new Date(b.inicio || 0) - new Date(a.inicio || 0))
-            },
-            envios: {
-              porTelefone: Array.from(enviosPorTelefone.values())
-                .sort((a,b) => b.total - a.total)
-                .slice(0, 100),
-              porNumeroDia: Array.from(enviosPorNumeroDia.values())
-                .sort((a,b) => b.dia.localeCompare(a.dia) || a.numero.localeCompare(b.numero)),
-              porNumeroHora: Array.from(enviosPorNumeroHora.values())
-                .sort((a,b) => b.hora.localeCompare(a.hora) || a.numero.localeCompare(b.numero))
-            },
-            // Mantem compatibilidade com telas antigas, mas continua contendo somente envios.
-            mensagens: {
-              porTelefone: Array.from(enviosPorTelefone.values())
-                .sort((a,b) => b.total - a.total)
-                .slice(0, 100),
-              porNumeroDia: Array.from(enviosPorNumeroDia.values())
-                .sort((a,b) => b.dia.localeCompare(a.dia) || a.numero.localeCompare(b.numero)),
-              porNumeroHora: Array.from(enviosPorNumeroHora.values())
-                .sort((a,b) => b.hora.localeCompare(a.hora) || a.numero.localeCompare(b.numero))
-            },
-            respostasClientes: {
-              totalLeads: leadsQueResponderam.size,
-              totalMensagens: Array.from(leadsQueResponderam.values())
-                .reduce((total, lead) => total + Number(lead.total_mensagens || 0), 0)
-            }
-          });
+          return json(200, obterDadosAnalytics());
         } catch(e) {
           return json(500, { error: e.message });
         }
@@ -1615,6 +1621,43 @@ const server = http.createServer((req, res) => {
         })();
       }
 
+      // ===== RELATORIOS (PDF) ENDPOINTS =====
+      if (url === '/api/reports/status') {
+        return json(200, pdfReportScheduler.obterStatus());
+      }
+
+      if (url === '/api/reports/historico') {
+        return json(200, { relatorios: pdfReport.obterHistorico() });
+      }
+
+      if (req.method === 'POST' && url === '/api/reports/gerar') {
+        (async () => {
+          try {
+            const registro = await pdfReportScheduler.gerar();
+            return json(200, { sucesso: true, relatorio: registro });
+          } catch (err) {
+            return json(500, { sucesso: false, erro: err.message });
+          }
+        })();
+        return;
+      }
+
+      if (req.method === 'GET' && url.startsWith('/api/reports/download/')) {
+        const nome = decodeURIComponent(url.split('/api/reports/download/')[1] || '');
+        const caminho = pdfReport.caminhoRelatorio(nome);
+        if (!caminho) {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('Relatorio nao encontrado');
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="${path.basename(caminho)}"`
+        });
+        fs.createReadStream(caminho).pipe(res);
+        return;
+      }
+
       // ===== MONITOR ENDPOINTS =====
       if (url === '/api/monitor/status') {
         const status = monitorSystem.obterStatus();
@@ -2053,4 +2096,4 @@ if (require.main === module) {
   startServer();
 }
 
-module.exports = { startServer };
+module.exports = { startServer, obterDadosAnalytics };

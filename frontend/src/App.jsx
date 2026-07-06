@@ -1,6 +1,6 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare, Brain, TrendingUp, Shield, Activity, LinkIcon, ClipboardCheck, GitBranch } from 'lucide-react';
+import { LayoutDashboard, Smartphone, Users, Settings, Terminal, BarChart2, MessageSquare, Brain, TrendingUp, Shield, Activity, LinkIcon, ClipboardCheck, GitBranch, FileText } from 'lucide-react';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Conexao = lazy(() => import('./pages/Conexao'));
@@ -20,6 +20,7 @@ const CRMConfig = lazy(() => import('./pages/CRMConfig'));
 const WarmConversationTest = lazy(() => import('./pages/WarmConversationTest'));
 const QualityCenter = lazy(() => import('./pages/QualityCenter'));
 const CRMFunnel = lazy(() => import('./pages/CRMFunnel'));
+const Relatorios = lazy(() => import('./pages/Relatorios'));
 
 function App() {
   return (
@@ -82,6 +83,9 @@ function App() {
             <NavLink to="/funil" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <GitBranch size={20} /> Funil de Vendas
             </NavLink>
+            <NavLink to="/relatorios" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <FileText size={20} /> Relatórios
+            </NavLink>
           </div>
         </nav>
         
@@ -107,6 +111,7 @@ function App() {
               <Route path="/monitor" element={<SystemMonitor />} />
               <Route path="/crm" element={<CRMConfig />} />
               <Route path="/funil" element={<CRMFunnel />} />
+              <Route path="/relatorios" element={<Relatorios />} />
             </Routes>
           </Suspense>
         </main>

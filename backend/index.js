@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const backupScheduler = require('./modules/backup-scheduler');
+const pdfReportScheduler = require('./modules/pdf-report-scheduler');
 const monitorScheduler = require('./modules/monitor-scheduler');
 const webserver = require('./modules/webserver');
 const chatStore = require('./modules/chat-store'); // Armazena conversas no painel
@@ -2101,6 +2102,14 @@ function iniciarBackupAutomatico() {
   console.log('✅ Scheduler de backup automático iniciado');
 }
 
+function iniciarRelatorioAutomatico() {
+  // Usar scheduler de relatório PDF (segunda-feira 8h por padrão)
+  const horarioRelatorio = process.env.REPORT_SCHEDULE_CRON || '0 8 * * 1';
+  pdfReportScheduler.iniciar(horarioRelatorio);
+
+  console.log('✅ Scheduler de relatório PDF iniciado');
+}
+
 function iniciarProspeccaoAgendada() {
   if (process.env.PROSPECCAO_AGENDA_ATIVA !== 'true' && !process.env.PROSPECCAO_CSV) {
     return;
@@ -2189,6 +2198,7 @@ async function iniciar() {
   iniciarLimpezaPeriodicaDeMemoria();
   iniciarHealthCheck();
   iniciarBackupAutomatico();
+  iniciarRelatorioAutomatico();
   monitorScheduler.iniciar(); // Monitor 24/7
   iniciarProspeccaoAgendada();
   iniciarManutencaoPeriodicaDeCache();

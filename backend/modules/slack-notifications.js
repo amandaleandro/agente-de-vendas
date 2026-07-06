@@ -143,6 +143,25 @@ class SlackNotifications {
   }
 
   /**
+   * Notificação de Relatório PDF Gerado
+   */
+  async relatorioGerado(registro) {
+    const campos = [
+      { title: 'Taxa de Sucesso', value: `${registro.taxa_sucesso}%`, short: true },
+      { title: 'Total Conversas', value: registro.total_conversas.toString(), short: true },
+      { title: 'Tamanho', value: `${registro.tamanho_kb}KB`, short: true },
+      { title: 'Arquivo', value: registro.nome, short: false }
+    ];
+
+    return this.enviar(
+      '📄 Relatório PDF Gerado',
+      'Novo relatório periódico disponível no painel (Relatórios).',
+      campos,
+      '#3498db'
+    );
+  }
+
+  /**
    * POST para Slack
    */
   private(payload) {
